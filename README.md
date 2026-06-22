@@ -30,6 +30,20 @@ Drops the command, planner, scripts, and execution spine into the repo's `.claud
 /orchestrate my-first-workstream
 ```
 
+## Using it
+
+You ideate and judge; the loop plans, builds, verifies, and reviews. It can't ship without you.
+
+1. **Hand off a goal.** In a Claude Code session rooted at the repo, run `/orchestrate <workstream-id>` — give the goal inline, or point it at a spec/notes file.
+2. **Walk away.** It plans, makes atomic commits, runs your tests + a live check, runs 1–3 independent reviews (depth scales to the change's blast radius), auto-resolves routine findings, and loops.
+3. **It stops at one of three places** and tells you:
+   - **CLEAN — awaiting approval:** verification passed; read the approval card and, if it's good, open the PR yourself.
+   - **FLAG-HUMAN:** a decision only a human should make (scope, money, a contract, a security posture). Record your ruling in `DECISIONS.md`, then re-run `/orchestrate <id>` to continue.
+   - **NON-CONVERGENT:** it hit the round cap without going clean; read `RISKS_AND_BLOCKERS.md` and decide whether to retry, narrow scope, or hand off.
+4. **You approve two things — only two:** _intent/scope_ (is this what you asked for?) and _reversibility_ (if it's wrong, how bad and how recoverable?). You are **not** certifying correctness — that's what the verification stack is for. Read the **approval card**, not the diff.
+
+The audit trail lives in `docs/execution/active/<id>/`: `APPROVAL_CARD.md` is the front page; `REVIEW.md`, `DECISIONS.md`, `TEST_RESULTS.md`, and `RUN_LOG.md` are the depth.
+
 ## Requirements
 
 - Claude Code, `git`, and `jq` (for the settings merge and the guard's JSON output).
