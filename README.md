@@ -13,6 +13,7 @@ A typical agent loop is manual across sessions: plan → run → a reviewer flag
 - **A machine-routable review contract** (`REVIEW_CONTRACT.md`) — independent review passes (depth scaled to blast radius) normalize into one verdict block the loop routes off by severity and reachability.
 - **A human gate, enforced two ways** — prose (the loop never records an approval, rules a human-flagged finding, opens a PR, or merges) **and** a mechanical guard: a `.loop-active` marker + a PreToolUse hook that blocks `gh pr create|merge` and `git push` while the loop runs.
 - **A PM-altitude approval card** — what the human signs off on: intent/scope + reversibility, with the confidence read and findings one step deep. Not a diff review.
+- **A validation-gate layer** — for workstreams whose *done* is a human keep/kill/extend verdict after real use: a `VERDICT_HARNESS` template that turns the use-period into evidence, and a `/dogfood` capture command with git-derived fix reconciliation.
 
 ## One round
 
@@ -43,6 +44,15 @@ You ideate and judge; the loop plans, builds, verifies, and reviews. It can't sh
 4. **You approve two things — only two:** _intent/scope_ (is this what you asked for?) and _reversibility_ (if it's wrong, how bad and how recoverable?). You are **not** certifying correctness — that's what the verification stack is for. Read the **approval card**, not the diff.
 
 The audit trail lives in `docs/execution/active/<id>/`: `APPROVAL_CARD.md` is the front page; `REVIEW.md`, `DECISIONS.md`, `TEST_RESULTS.md`, and `RUN_LOG.md` are the depth.
+
+## Validation-gate workstreams
+
+Some workstreams aren't done when the build passes — their real acceptance criterion is a **human verdict after real use** (a dogfood, a pilot): "do I reach for it, does it earn trust?" No test answers that, and the loop can't live in the thing for two weeks. For these, the loop's job ends at *built + harness scaffolded + a readiness pass*; the verdict is yours.
+
+- **`VERDICT_HARNESS.md`** (from `templates/VERDICT_HARNESS.template.md`) turns the use-period into evidence, not vibes: criteria tallies, per-criterion evidence logs, a safety/invariant log, a friction list, and the keep/kill/extend verdict you write at the deadline.
+- **`/dogfood`** is the one-action capture command: log friction as you hit it (with one clarifying question when a report is too vague to fix cold), and `/dogfood reconcile` back-fills fix status from merged PRs — the log derives from git, never from memory.
+
+Same rule as the approval gate, one level up: **the loop instruments the judgment; it never makes it.** Details in the guide's "Validation-gate workstreams" section.
 
 ## Requirements
 

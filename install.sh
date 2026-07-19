@@ -18,8 +18,9 @@ echo "Installing agent-orchestration-loop into $TARGET"
 mkdir -p "$TARGET/.claude/commands" "$TARGET/.claude/agents" "$TARGET/.claude/scripts" \
          "$TARGET/docs/execution/templates" "$TARGET/docs/execution/active" "$TARGET/docs/execution/done"
 
-# 2. command + planner agent
+# 2. commands + planner agent
 cp "$KIT_DIR/commands/orchestrate.md" "$TARGET/.claude/commands/orchestrate.md"
+cp "$KIT_DIR/commands/dogfood.md"     "$TARGET/.claude/commands/dogfood.md"
 cp "$KIT_DIR/agents/planner.md"       "$TARGET/.claude/agents/planner.md"
 
 # 3. scripts: workstream init + the human-gate guard
