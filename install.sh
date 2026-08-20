@@ -79,4 +79,37 @@ else
   echo "      command: $HOOK_CMD"
 fi
 
+# 7. preflight: the review stage calls skills this kit does not ship
+# §2c of orchestrate.md spawns these by name. They ride along with Claude Code
+# on most builds, in which case nothing is on disk to find — so this NEVER fails
+# the install, it only tells you what could not be seen.
+REVIEW_SKILLS="code-review adversarial-reviewer run"
+PLUGIN_LIST=""
+command -v claude >/dev/null 2>&1 && PLUGIN_LIST="$(claude plugin list 2>/dev/null || true)"
+
+undetected=""
+for skill in $REVIEW_SKILLS; do
+  found=""
+  for dir in "$HOME/.claude/skills/$skill" "$TARGET/.claude/skills/$skill"; do
+    [ -f "$dir/SKILL.md" ] && found=1
+  done
+  [ -z "$found" ] && [ -d "$HOME/.claude/plugins/marketplaces" ] &&
+    find "$HOME/.claude/plugins/marketplaces" -maxdepth 4 -type d -name "$skill" 2>/dev/null |
+    grep -q . && found=1
+  [ -z "$found" ] && printf '%s' "$PLUGIN_LIST" | grep -q "$skill" && found=1
+  [ -z "$found" ] && undetected="$undetected $skill"
+done
+
+echo
+if [ -z "$undetected" ]; then
+  echo "Review skills: all found on disk ($REVIEW_SKILLS)"
+else
+  echo "Review skills not found on disk:$undetected"
+  echo "  These ship bundled with many Claude Code builds, so this is often a false alarm."
+  echo "  Confirm in a session at the repo: /plugin  (or just type / and look for them)"
+  echo "  If they are genuinely absent, /orchestrate plans and executes but stalls at"
+  echo "  step 2c — swap the missing pass for one you do have, or drop review depth a tier."
+fi
+
+echo
 echo "Done. In a Claude Code session rooted at the repo, run:  /orchestrate <workstream-id>"

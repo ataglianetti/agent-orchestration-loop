@@ -57,7 +57,11 @@ Same rule as the approval gate, one level up: **the loop instruments the judgmen
 ## Requirements
 
 - Claude Code, `git`, and `jq` (for the settings merge and the guard's JSON output).
-- Review passes use the `adversarial-reviewer`, `run`, and `code-review` skills; the live check uses `verify`.
+- Review passes and the live check use the `adversarial-reviewer`, `run`, and `code-review` skills.
+  These are not shipped here — they come with Claude Code (bundled on most builds) or from a plugin.
+  `install.sh` runs a non-fatal preflight and names any it can't find on disk; bundled skills leave
+  nothing on disk to find, so confirm with `/plugin` in a session before treating a miss as real.
+  Without them the loop still plans and executes, but stalls at the review step.
 
 ## The human gate — why it's mechanical, not just instructions
 

@@ -40,7 +40,7 @@ If an executor closes with a **"your call?"** question: **you answer it** — pr
 
 ### 2b. Verify — the gates (your eyes, not the PM's)
 - **Coverage gate:** a test must exercise *this* change and pass. No test for the new path is a **fail**, not a pass.
-- **Live reality-check:** run the real thing via the `verify` skill against the real endpoint/build (the repo's `CLAUDE_ORCHESTRATION_GUIDE.md` §5 names the exact test + smoke commands).
+- **Live reality-check:** run the real thing via the `run` skill against the real endpoint/build (the repo's `CLAUDE_ORCHESTRATION_GUIDE.md` §5 names the exact test + smoke commands).
 - Record both to `TEST_RESULTS.md` (Automated / Manual / Gaps). A failed gate produces findings; it cannot reach a clean exit.
 
 ### 2c. Review — independent personas, depth scaled to blast radius
