@@ -59,7 +59,7 @@ Or run the full autonomous loop: `/orchestrate <workstream-id>`.
 
 ## The human gate (do not weaken)
 
-`/orchestrate` auto-resolves routine review findings but **never acts as the human**: it never records an approval, never rules a `FLAG-HUMAN`, and never opens a PR or merges. A `.loop-active` marker plus the `block-human-gated-actions.sh` PreToolUse hook enforce this mechanically — the loop *cannot* open/merge a PR or push while it runs. The loop stops at the approval card; a human opens/merges the PR.
+`/orchestrate` auto-resolves routine review findings but **never acts as the human**: it never records an approval, never rules a `FLAG-HUMAN`, and never opens a PR or merges. A `.loop-active` marker plus the `block-human-gated-actions.sh` PreToolUse hook enforce this mechanically — the loop *cannot* open/merge a PR or push while it runs, **and cannot remove the marker to get around that**. The marker is human-only: the loop writes it at run start and never clears it, because a gate the gated party can delete is not a gate. The loop stops at the approval card with the marker still in place; the human clears it (`rm .loop-active`, from their own terminal) and opens/merges the PR.
 
 ## Validation-gate workstreams (the verdict harness)
 

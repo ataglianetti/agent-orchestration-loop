@@ -23,9 +23,11 @@ cp "$KIT_DIR/commands/orchestrate.md" "$TARGET/.claude/commands/orchestrate.md"
 cp "$KIT_DIR/commands/dogfood.md"     "$TARGET/.claude/commands/dogfood.md"
 cp "$KIT_DIR/agents/planner.md"       "$TARGET/.claude/agents/planner.md"
 
-# 3. scripts: workstream init + the human-gate guard
+# 3. scripts: workstream init + the human-gate guard + the human's gate-clearing helper
 cp "$KIT_DIR/scripts/init-workstream.sh"           "$TARGET/.claude/scripts/init-workstream.sh"
 cp "$KIT_DIR/scripts/block-human-gated-actions.sh" "$TARGET/.claude/scripts/block-human-gated-actions.sh"
+# Placed, never wired: sourcing loop-gate.zsh into your shell rc is your call, not the installer's.
+cp "$KIT_DIR/scripts/loop-gate.zsh"                "$TARGET/.claude/scripts/loop-gate.zsh"
 
 # 4. execution spine
 cp "$KIT_DIR/execution/REVIEW_CONTRACT.md" "$TARGET/docs/execution/REVIEW_CONTRACT.md"
