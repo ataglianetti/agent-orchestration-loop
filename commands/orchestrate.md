@@ -21,7 +21,9 @@ Pick the workstream id from `$ARGUMENTS`. Then:
 
 State the resolved state back in one line before looping — e.g. `Resuming <id> at round 3; last verdict CONCERNS; 2 open findings (F1, F4).` or `Initialized <id>.`
 
-**Create the run marker:** write `.loop-active` at the repo root before any execution. While it exists, a PreToolUse hook (`.claude/scripts/block-human-gated-actions.sh`) blocks `gh pr create` / `gh pr merge` / `git push` — so the loop *physically cannot* open or merge a PR, regardless of what it concludes. **Remove `.loop-active` at every hard stop** (clean exit, FLAG-HUMAN, non-convergence) so the human is un-gated.
+**Create the run marker:** write `.loop-active` at the repo root before any execution. While it exists, a PreToolUse hook (`.claude/scripts/block-human-gated-actions.sh`) blocks `gh pr create` / `gh pr merge` / `git push` — so the loop *physically cannot* open or merge a PR, regardless of what it concludes.
+
+**Never remove the marker.** It is human-only, and the hook blocks the loop from deleting, renaming, or `git clean -x`-ing it. Writing it is your job; clearing it is not. If the loop could clear its own gate, the gate would not be a gate — a run that decided to ship would clear it first, which is the same arithmetic that opened the original self-approved PR. At every hard stop (clean exit, FLAG-HUMAN, non-convergence) you leave the marker in place and end the run. The human clears it from their own terminal when they act on the card; the next run overwrites it.
 
 ## 1. Plan (read-only, once)
 
@@ -70,7 +72,7 @@ Where the repo's posture is aggressive (reversible work — see Per-repo specifi
 
 Record every routing decision (and every auto-resolved critical) in `DECISIONS.md`. Fixes are executor Tasks; after a fix, the loop re-reviews (back to 2c) — never mark a fixed critical resolved without a fresh review pass confirming it.
 
-**On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#` — the only things blocking — fill §1–3 for context with depth linked in §5, link the card from `README.md`, **remove the run marker** (`rm .loop-active`), and **end the run**. Do not rule on the finding, resolve it, or proceed past it.
+**On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#` — the only things blocking — fill §1–3 for context with depth linked in §5, link the card from `README.md`, **leave the run marker in place**, and **end the run**. Do not rule on the finding, resolve it, or proceed past it.
 
 **A `FLAG-HUMAN` is a stop even when it looks already-decided.** If you believe the KICKOFF or `DECISIONS.md` already settles it, do **not** rule and do **not** record a ruling — surface it on the card quoting the exact line that appears to settle it (`appears consistent with KICKOFF: "<quote>" — confirm?`) and stop. A settled decision belongs to its real source (the KICKOFF the PM wrote); never manufacture a fresh "PM ruled `<today>`" event. The loop continues only after the PM's ruling exists in `DECISIONS.md` — written by the PM, not by you — and they re-invoke `/orchestrate <id>`.
 
@@ -88,7 +90,7 @@ High = "verified three ways, all agree." Low = "thin — one reviewer, no live t
 
 ### 2f. Loop control
 - `VERDICT == CLEAN` **and** all gates pass → exit to **step 3**.
-- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **remove the run marker** (`rm .loop-active`), and stop. No clean exit.
+- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop. No clean exit.
 - A `FLAG-HUMAN` paused the loop → stop, surface pending.
 - Otherwise → next round (back to 2a: execute fixes, then the next wave).
 
@@ -103,7 +105,7 @@ Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`,
 3. **How confident** — the 2e read (independent reviewers + coverage + live-check agree? gaps?).
 4. **Findings digest** — auto-fixed criticals one line each (never hidden), warnings/notes parked silently with a count, any remaining `FLAG-HUMAN` front and center.
 
-Then **remove the run marker** (`rm .loop-active`) and **end the run** with one line: `AWAITING PM APPROVAL — <id> on <branch>; card at <path>`. Keep depth one step away (links to `REVIEW.md` / `TEST_RESULTS.md` / `DECISIONS.md`), never the full review in their face. The PM approves **intent/scope and reversibility only** — correctness was delegated to the verification stack (which is why it had to be strong enough to earn a blind sign-off).
+Then **leave the run marker in place** and **end the run** with one line: `AWAITING PM APPROVAL — <id> on <branch>; card at <path>. Clear the gate when you act: rm .loop-active`. Keep depth one step away (links to `REVIEW.md` / `TEST_RESULTS.md` / `DECISIONS.md`), never the full review in their face. The PM approves **intent/scope and reversibility only** — correctness was delegated to the verification stack (which is why it had to be strong enough to earn a blind sign-off).
 
 ### The human gate — actions the loop NEVER performs
 

@@ -11,7 +11,7 @@ A typical agent loop is manual across sessions: plan → run → a reviewer flag
 - **`/orchestrate <workstream-id>`** — the loop. State lives in `docs/execution/active/<id>/`, so it resumes across sessions and machines.
 - **The workstream spine** — `WORKBOARD`, `ACCEPTANCE_CRITERIA`, `TEST_PLAN`/`TEST_RESULTS`, `DECISIONS`, `RISKS_AND_BLOCKERS`, `RUN_LOG`, `REVIEW`, `SUBAGENTS/`. The audit trail *is* the approval artifact.
 - **A machine-routable review contract** (`REVIEW_CONTRACT.md`) — independent review passes (depth scaled to blast radius) normalize into one verdict block the loop routes off by severity and reachability.
-- **A human gate, enforced two ways** — prose (the loop never records an approval, rules a human-flagged finding, opens a PR, or merges) **and** a mechanical guard: a `.loop-active` marker + a PreToolUse hook that blocks `gh pr create|merge` and `git push` while the loop runs.
+- **A human gate, enforced two ways** — prose (the loop never records an approval, rules a human-flagged finding, opens a PR, or merges) **and** a mechanical guard: a `.loop-active` marker + a PreToolUse hook that blocks `gh pr create|merge` and `git push` while the loop runs, and blocks the loop from removing the marker to get around that. The marker is human-only — you clear it from your own terminal when you act on the card.
 - **A PM-altitude approval card** — what the human signs off on: intent/scope + reversibility, with the confidence read and findings one step deep. Not a diff review.
 - **A validation-gate layer** — for workstreams whose *done* is a human keep/kill/extend verdict after real use: a `VERDICT_HARNESS` template that turns the use-period into evidence, and a `/dogfood` capture command with git-derived fix reconciliation.
 
