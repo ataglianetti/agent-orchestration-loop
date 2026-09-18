@@ -75,6 +75,8 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
 - **Hard (opt-in, one `sudo` at each end).** A marker the agent's user physically cannot remove — root-owned, in a directory outside the repo the agent can't write to. No command the loop runs (shell, glob, symlink, interpreter, tree rollback) can clear it; only you can, with `sudo`. This is the categorical version: it stops relying on a list of blocked commands and makes the gate un-clearable by the thing being gated.
 
+  A marker is only as strong as the hook that reads it, and that hook is wired in the repo's `.claude/settings.json` — a file the agent owns as much as the marker, so editing one line there to unwire the guard would be quieter than any rm (and a Bash guard can't even see an Edit-tool change to it). So the hard lock also **freezes `.claude/settings.json`** (`chflags schg` on macOS, `chattr +i` on Linux) while the run is locked: the agent can't edit, rename, or delete it, and can't lift the flag, because that needs root. Unlock lifts it. Marker and wiring go out of reach together, which is what makes the hard lock categorical rather than a stronger suggestion.
+
   ```bash
   sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
   # ... run /orchestrate <id> as usual; planner and executors need no sudo ...

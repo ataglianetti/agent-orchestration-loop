@@ -31,6 +31,16 @@ GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
 REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P))"
 KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
 MARKER="$GUARD_DIR/$KEY"
+# The hook wiring to freeze. Overridable for tests, same as LOOP_GUARD_DIR.
+SETTINGS="${LOOP_SETTINGS:-$REPO/.claude/settings.json}"
+
+# Make a file immutable even against its owner: schg (macOS) / +i (Linux). Both need root to set
+# AND to clear, so a non-root agent can neither modify the file nor lift the flag.
+freeze() {
+  if   command -v chflags >/dev/null 2>&1; then chflags schg "$1"
+  elif command -v chattr  >/dev/null 2>&1; then chattr +i "$1"
+  else echo "  WARNING: no chflags or chattr found — cannot freeze $1" >&2; return 1; fi
+}
 
 # Root-owned directory, not writable by anyone but root. This is what makes the marker inside it
 # un-removable by the agent's user — the permission that matters for unlink is on the directory.
@@ -40,17 +50,29 @@ if [ -f "$MARKER" ]; then
   echo "Already locked: a hard run marker is in force for this repo."
   echo "  repo:   $REPO"
   echo "  marker: $MARKER"
-  exit 0
+else
+  : > "$MARKER"
+  chmod 644 "$MARKER"
+  printf 'repo=%s\nlocked_at=%s\nlocked_by=%s\n' \
+    "$REPO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SUDO_USER:-root}" > "$MARKER"
+  echo "Locked. The loop is now categorically gated for this repo."
+  echo "  repo:   $REPO"
+  echo "  marker: $MARKER (root-owned; the agent's user cannot remove it)"
 fi
 
-: > "$MARKER"
-chmod 644 "$MARKER"
-printf 'repo=%s\nlocked_at=%s\nlocked_by=%s\n' \
-  "$REPO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SUDO_USER:-root}" > "$MARKER"
+# Freeze the hook wiring too. The marker is only as strong as the hook that reads it, and that hook
+# is wired in .claude/settings.json — a file the agent owns as much as the marker. Editing one line
+# there to unwire the guard is quieter than any rm, and a Bash PreToolUse guard cannot even see an
+# Edit-tool change to it. Freezing it means the agent can neither edit, rename, nor delete
+# settings.json while the run is locked; only unlock-loop.sh lifts the flag.
+if [ -f "$SETTINGS" ]; then
+  if freeze "$SETTINGS"; then
+    echo "  frozen: $SETTINGS (the agent cannot unwire the guard while locked)"
+  fi
+else
+  echo "  NOTE: $SETTINGS not found — hook wiring not frozen. Is the guard installed in this repo?" >&2
+fi
 
-echo "Locked. The loop is now categorically gated for this repo."
-echo "  repo:   $REPO"
-echo "  marker: $MARKER (root-owned; the agent's user cannot remove it)"
 echo
 echo "Next:  run /orchestrate <id> as usual. Clear the gate when you act on the card:"
 echo "  sudo $(dirname "${BASH_SOURCE[0]}")/unlock-loop.sh"

@@ -64,6 +64,22 @@ echo "== lock/unlock refuse to run without root (so a non-root agent cannot self
 LOOP_GUARD_DIR="$TG" bash "$LOCK"   >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop ran without root"; }
 LOOP_GUARD_DIR="$TG" bash "$UNLOCK" >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop ran without root"; }
 
+# The hook-config freeze uses schg (macOS) / +i (Linux), which need root to set — so, like the
+# root-owned marker, the freeze itself is proven by the sudo smoke test, not here. This suite
+# verifies the wiring is present: lock freezes the hook config, unlock lifts it, status reports it.
+echo "== the hook-config freeze is wired into lock/unlock/status =="
+grep -q 'chflags schg\|chattr +i' "$LOCK"     && grep -q 'freeze "\$SETTINGS"' "$LOCK"   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop does not freeze the hook config"; }
+grep -q 'chflags noschg\|chattr -i' "$UNLOCK" && grep -q 'unfreeze "\$SETTINGS"' "$UNLOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop does not unfreeze the hook config"; }
+grep -q 'unconditionally' "$UNLOCK"           && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop must unfreeze unconditionally (a forgotten lock must not leave the config frozen)"; }
+grep -q 'is_frozen' "$STATUS"                 && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: loop-status does not report the frozen hook config"; }
+
+echo "== is_frozen reports false for an ordinary (unfrozen) file =="
+# Pull is_frozen out of loop-status and exercise its negative case without root.
+tmpf="$TG/plainfile"; : > "$tmpf"
+if bash -c "$(sed -n '/^is_frozen()/,/^}/p' "$STATUS"); is_frozen \"$tmpf\""; then
+  FAIL=$((FAIL+1)); echo "  FAIL: is_frozen reported a plain file as frozen"
+else PASS=$((PASS+1)); fi
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
