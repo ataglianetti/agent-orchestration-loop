@@ -28,6 +28,11 @@ cp "$KIT_DIR/scripts/init-workstream.sh"           "$TARGET/.claude/scripts/init
 cp "$KIT_DIR/scripts/block-human-gated-actions.sh" "$TARGET/.claude/scripts/block-human-gated-actions.sh"
 # Placed, never wired: sourcing loop-gate.zsh into your shell rc is your call, not the installer's.
 cp "$KIT_DIR/scripts/loop-gate.zsh"                "$TARGET/.claude/scripts/loop-gate.zsh"
+# Opt-in hard gate: a root-owned marker the agent's user cannot remove. lock/unlock need sudo;
+# status is read-only. See README "The marker the gate reads".
+cp "$KIT_DIR/scripts/lock-loop.sh"                 "$TARGET/.claude/scripts/lock-loop.sh"
+cp "$KIT_DIR/scripts/unlock-loop.sh"               "$TARGET/.claude/scripts/unlock-loop.sh"
+cp "$KIT_DIR/scripts/loop-status.sh"               "$TARGET/.claude/scripts/loop-status.sh"
 
 # 4. execution spine
 cp "$KIT_DIR/execution/REVIEW_CONTRACT.md" "$TARGET/docs/execution/REVIEW_CONTRACT.md"

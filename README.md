@@ -67,6 +67,22 @@ Same rule as the approval gate, one level up: **the loop instruments the judgmen
 
 The loop runs autonomously but **never acts as the human**: it can't record an approval, rule a `FLAG-HUMAN` finding, open a PR, or merge. The first time this loop ran for real, it reached a clean review and then *self-approved and opened a PR* — exactly the thing it was told never to do. Prose alone has a ceiling; an agent optimizing to finish will rationalize past it. So the gate is enforced mechanically: while a run is active, the PreToolUse guard makes `gh pr create|merge` and `git push` impossible. `CLEAN` means *ready for a human*, not *approved*.
 
+### The marker the gate reads — soft by default, hard when it matters
+
+The gate is a marker file the guard checks. There are two, and the difference is who can remove it.
+
+- **Soft (default, zero friction).** The loop writes `.loop-active` at the repo root and never removes it; the guard walls every removal path it knows — `rm`, `mv`, `unlink`, `shred`, `-delete`, `git clean -x`, and interpreter deletes like `os.remove` / `fs.unlink`. Strong, but it's a *list*, and a novel deletion path is a hole until the list catches up. You clear it yourself with `rm .loop-active` (or the `ungate` helper) when you act on the card.
+
+- **Hard (opt-in, one `sudo` at each end).** A marker the agent's user physically cannot remove — root-owned, in a directory outside the repo the agent can't write to. No command the loop runs (shell, glob, symlink, interpreter, tree rollback) can clear it; only you can, with `sudo`. This is the categorical version: it stops relying on a list of blocked commands and makes the gate un-clearable by the thing being gated.
+
+  ```bash
+  sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
+  # ... run /orchestrate <id> as usual; planner and executors need no sudo ...
+  sudo ./.claude/scripts/unlock-loop.sh   # after you act on the card — clears it
+  ```
+
+  `./.claude/scripts/loop-status.sh` reports which marker (if any) holds the gate. **Lock when a rogue ship would reach something real and you won't be watching** — solo repos with no downstream review, unattended or overnight runs, direct-to-main. **Skip it** for supervised runs, throwaway branches, or repos whose own branch protection already gates merges; there the `sudo` is friction for nothing and the soft default is enough.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

@@ -32,7 +32,24 @@ CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$CMD" ] && exit 0
 
 ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
-[ -f "$ROOT/.loop-active" ] || exit 0   # no active loop → no restriction
+
+# The gate is active if EITHER marker is present:
+#   - soft: `$ROOT/.loop-active`, written by the loop itself (default, zero-friction runs). The
+#     agent can write it, so the agent can in principle remove it — sections 2/3 below wall the
+#     known removal paths, but a soft marker is only ever as strong as that list of paths.
+#   - hard: a root-owned file under $LOOP_GUARD_DIR, dropped by `sudo lock-loop.sh` for a run you
+#     want categorically gated. It lives outside the repo in a directory the agent's user cannot
+#     write to, so NO command the agent runs — string-matched or not — can remove it. Only
+#     `sudo unlock-loop.sh` clears it. LOOP_GUARD_DIR is overridable so the suite can test the
+#     hard path without root.
+# The hard marker's path must be computed identically here and in lock-loop.sh / unlock-loop.sh /
+# loop-status.sh, or they will not agree on the same file. Key it on the git repo root — the one
+# value all four can resolve the same way regardless of install layout (.claude/scripts vs scripts)
+# or where the command was invoked. Fall back to $ROOT if this is somehow not a git repo.
+LOOP_GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
+GUARD_REPO="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$ROOT")"
+HARD_MARKER="$LOOP_GUARD_DIR/$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
+[ -f "$ROOT/.loop-active" ] || [ -f "$HARD_MARKER" ] || exit 0   # no active loop → no restriction
 
 deny() {
   printf '%s\n' "$1" >&2
@@ -57,9 +74,14 @@ fi
 #    the same way shipping is. Truncating it is not blocked — an empty marker file still
 #    exists, so the gate still holds.
 if printf '%s' "$CMD" | grep -Fq '.loop-active'; then
+  # A removal aimed at the marker, whether it names a shell verb (rm/unlink/shred/mv/-delete) or
+  # reaches the same syscall through a language runtime (python os.remove, node fs.unlink, perl/
+  # ruby unlink, PowerShell Remove-Item). The interpreter path names no shell verb — that is the
+  # hole a pure verb match leaves open, and the categorical fix is the hard marker, not this list.
   if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_.-])(rm|unlink|shred|mv)([[:space:]]|$)' \
-    || printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])-delete([[:space:]]|$)'; then
-    deny "Blocked by the orchestrate loop guard: the .loop-active marker is human-only. The loop writes it at run start and never removes it — if the loop could clear its own gate, the gate would not be a gate. Reach a hard stop (clean exit, FLAG-HUMAN, or non-convergence), write the approval card, and end the run with the marker in place. $OVERRIDE"
+    || printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])-delete([[:space:]]|$)' \
+    || printf '%s' "$CMD" | grep -Eq 'os\.(remove|unlink)|shutil\.rmtree|\.unlink\(|(^|[^[:alnum:]_])unlink[[:space:](]|fs\.(unlink|rm)|rmSync|File\.(delete|unlink)|Remove-Item'; then
+    deny "Blocked by the orchestrate loop guard: the .loop-active marker is human-only. The loop writes it at run start and never removes it — if the loop could clear its own gate, the gate would not be a gate. This includes deleting it through a language runtime (os.remove, fs.unlink, unlink), not only shell rm. Reach a hard stop (clean exit, FLAG-HUMAN, or non-convergence), write the approval card, and end the run with the marker in place. $OVERRIDE"
   fi
 fi
 

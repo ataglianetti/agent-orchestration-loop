@@ -21,9 +21,14 @@ Pick the workstream id from `$ARGUMENTS`. Then:
 
 State the resolved state back in one line before looping — e.g. `Resuming <id> at round 3; last verdict CONCERNS; 2 open findings (F1, F4).` or `Initialized <id>.`
 
-**Create the run marker:** write `.loop-active` at the repo root before any execution. While it exists, a PreToolUse hook (`.claude/scripts/block-human-gated-actions.sh`) blocks `gh pr create` / `gh pr merge` / `git push` — so the loop *physically cannot* open or merge a PR, regardless of what it concludes.
+**Create the run marker:** first check the gate — run `./.claude/scripts/loop-status.sh`. If it reports `ACTIVE`, the human has **locked** this run (a hard, root-owned marker is already in force) — do not write anything, the gate is already up. If it reports `INACTIVE`, write `.loop-active` at the repo root before any execution. Either way, while the gate is active a PreToolUse hook (`.claude/scripts/block-human-gated-actions.sh`) blocks `gh pr create` / `gh pr merge` / `git push` — so the loop *physically cannot* open or merge a PR, regardless of what it concludes.
 
-**Never remove the marker.** It is human-only, and the hook blocks the loop from deleting, renaming, or `git clean -x`-ing it. Writing it is your job; clearing it is not. If the loop could clear its own gate, the gate would not be a gate — a run that decided to ship would clear it first, which is the same arithmetic that opened the original self-approved PR. At every hard stop (clean exit, FLAG-HUMAN, non-convergence) you leave the marker in place and end the run. The human clears it from their own terminal when they act on the card; the next run overwrites it.
+**Never remove the marker.** It is human-only, and the hook blocks the loop from deleting, renaming, `git clean -x`-ing, or removing it through a language runtime (`os.remove`, `fs.unlink`). Writing the soft marker is your job; clearing any marker is not. If the loop could clear its own gate, the gate would not be a gate — a run that decided to ship would clear it first, which is the same arithmetic that opened the original self-approved PR. At every hard stop (clean exit, FLAG-HUMAN, non-convergence) you leave the marker in place and end the run.
+
+**Two gate modes, and how each is cleared** (this is the human's choice, not yours — you only ever write the soft marker, and only when the gate is not already up):
+
+- **Soft (default):** the loop wrote `.loop-active`. The human clears it with `rm .loop-active` from their own terminal when they act on the card; the next run overwrites it. Strong, but the wall is a list of blocked commands.
+- **Hard (opt-in, `sudo ./.claude/scripts/lock-loop.sh`):** a root-owned marker outside the repo the agent's user cannot remove by any means. The human clears it with `sudo ./.claude/scripts/unlock-loop.sh`. Use it for unattended runs on a repo with no downstream human review.
 
 ## 1. Plan (read-only, once)
 
