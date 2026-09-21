@@ -75,7 +75,18 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
 - **Hard (opt-in, one `sudo` at each end).** A marker the agent's user physically cannot remove — root-owned, in a directory outside the repo the agent can't write to. No command the loop runs (shell, glob, symlink, interpreter, tree rollback) can clear it; only you can, with `sudo`. This is the categorical version: it stops relying on a list of blocked commands and makes the gate un-clearable by the thing being gated.
 
-  A marker is only as strong as the hook that reads it, and that hook is wired in the repo's `.claude/settings.json` — a file the agent owns as much as the marker, so editing one line there to unwire the guard would be quieter than any rm (and a Bash guard can't even see an Edit-tool change to it). So the hard lock also **freezes `.claude/settings.json`** (`chflags schg` on macOS, `chattr +i` on Linux) while the run is locked: the agent can't edit, rename, or delete it, and can't lift the flag, because that needs root. Unlock lifts it. Marker and wiring go out of reach together, which is what makes the hard lock categorical rather than a stronger suggestion.
+  A marker is only as strong as the hook that reads it, and that hook lives entirely inside `.claude/` — a directory the agent owns as much as the marker. Unwiring the guard from in there is quieter than any rm, and a Bash guard can't even see an Edit-tool change to a file. There are at least three doors: `disableAllHooks` in `.claude/settings.json`; the same key in `.claude/settings.local.json`, which Claude Code honours too and which usually doesn't exist yet, so the agent can simply *create* it; or editing `exit 0` into the top of the hook script itself, touching no settings file at all.
+
+  So the hard lock **freezes the whole `.claude/` subtree** (`chflags schg` on macOS, `chattr +i` on Linux) while the run is locked. Both halves of that are load-bearing, because each blocks something the other doesn't:
+
+  | Immutable | Create new file | Delete file | Edit existing file in place |
+  |---|---|---|---|
+  | directory only | blocked | blocked | **allowed** |
+  | file only | — | — | blocked |
+
+  Freezing the directory is what stops `settings.local.json` from being created; freezing the files is what stops the existing ones being edited. Neither alone closes it, which is why an earlier version that froze only `.claude/settings.json` left two ways through. The subtree freeze also means there is no filename list to maintain — a settings file this kit has never heard of is covered the day it is invented. The agent can't lift any of it, because that needs root; unlock lifts all of it. This is safe because `.claude/` is written at install time and only *read* during a run: the loop's state lives in `docs/execution/`, and the soft marker at the repo root.
+
+  One consequence worth knowing before it surprises you mid-run: while locked, **"Allow always" on a permission prompt will fail**, because Claude Code records that grant in `.claude/settings.local.json`. That is the lock working rather than a fault — a standing allow rule written during an unattended run is exactly the thing being prevented. Choose "Allow once", or unlock first if you genuinely want a permanent grant.
 
   ```bash
   sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
@@ -84,6 +95,19 @@ The gate is a marker file the guard checks. There are two, and the difference is
   ```
 
   `./.claude/scripts/loop-status.sh` reports which marker (if any) holds the gate. **Lock when a rogue ship would reach something real and you won't be watching** — solo repos with no downstream review, unattended or overnight runs, direct-to-main. **Skip it** for supervised runs, throwaway branches, or repos whose own branch protection already gates merges; there the `sudo` is friction for nothing and the soft default is enough.
+
+## Acknowledgements
+
+The gate is harder than it was because people took it apart in public.
+
+[u/northbridgedev](https://www.reddit.com/user/northbridgedev/) reviewed the guard in [the r/ClaudeCode thread](https://www.reddit.com/r/ClaudeCode/comments/1wgjq3j/my_agent_deleted_the_file_that_was_stopping_it/) on the original marker-deletion post, and four things here came out of that:
+
+- **The hinge.** A marker the agent cannot delete is worth little while the hook that *reads* it sits in a file the agent owns. That is why the hard lock freezes the hook wiring and not just the marker.
+- **`.claude/settings.local.json`.** Claude Code honours `disableAllHooks` there too, and the file usually does not exist yet — so the agent can create it rather than edit anything. That is why the freeze covers the subtree instead of one filename.
+- **Unlink is a permission on the directory, not on the file.** `chmod 000` a file you own and `rm -f` still removes it. The marker lives in a root-owned *directory* for this reason.
+- **`scripts/tests/test-denial-suggestions.sh`** exists because they proposed it: feed every command a denial message suggests back through the hook, and assert each one passes *and* leaves the marker standing. A block message that hands over a working bypass is its own class of bug, and this repo had one.
+
+They also withdrew one of their own reported cases when it did not reproduce, which is the part of code review nobody writes blog posts about.
 
 ## License
 

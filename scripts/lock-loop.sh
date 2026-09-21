@@ -31,15 +31,48 @@ GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
 REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P))"
 KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
 MARKER="$GUARD_DIR/$KEY"
-# The hook wiring to freeze. Overridable for tests, same as LOOP_GUARD_DIR.
-SETTINGS="${LOOP_SETTINGS:-$REPO/.claude/settings.json}"
+# The hook wiring to freeze — the WHOLE .claude subtree, not one settings file. Overridable for
+# tests, same as LOOP_GUARD_DIR.
+CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
-# Make a file immutable even against its owner: schg (macOS) / +i (Linux). Both need root to set
-# AND to clear, so a non-root agent can neither modify the file nor lift the flag.
+# Make a path immutable even against its owner: schg (macOS) / +i (Linux). Both need root to set
+# AND to clear, so a non-root agent can neither modify the path nor lift the flag.
 freeze() {
   if   command -v chflags >/dev/null 2>&1; then chflags schg "$1"
   elif command -v chattr  >/dev/null 2>&1; then chattr +i "$1"
   else echo "  WARNING: no chflags or chattr found — cannot freeze $1" >&2; return 1; fi
+}
+
+# Freeze a directory AND everything in it. Both halves are required, and each blocks something the
+# other does not — verified, not assumed:
+#
+#   immutable DIRECTORY only  → creating a new file is blocked, deleting one is blocked, but
+#                               editing an existing file IN PLACE still succeeds.
+#   immutable FILE only       → in-place edits are blocked, but a NEW sibling can be created.
+#
+# So freezing just .claude/settings.json (what this script did before) left two ways through:
+# create .claude/settings.local.json, which also accepts `disableAllHooks`, or edit
+# .claude/scripts/block-human-gated-actions.sh in place and neuter the hook at the source. The
+# subtree freeze closes both, and closes them categorically — it does not enumerate filenames, so
+# a settings file this kit has never heard of is covered the day it is invented.
+#
+# This is safe because .claude/ is written at INSTALL time and only read at run time: the loop's
+# own state lives in docs/execution/, and the soft marker lives at the repo root. Nothing the loop
+# does during a run writes into .claude/.
+#
+# Contents first, directory last (-depth): the directory's own flag is set once its children are
+# already done, which avoids depending on whether a given kernel lets you re-flag a child inside
+# an already-immutable parent.
+freeze_tree() {
+  local d="$1"
+  if   command -v chflags >/dev/null 2>&1; then
+    find "$d" -depth -exec chflags schg {} + 2>/dev/null
+  elif command -v chattr >/dev/null 2>&1; then
+    find "$d" -type f -exec chattr +i {} + 2>/dev/null
+    find "$d" -depth -type d -exec chattr +i {} + 2>/dev/null
+  else
+    echo "  WARNING: no chflags or chattr found — cannot freeze $d" >&2; return 1
+  fi
 }
 
 # Root-owned directory, not writable by anyone but root. This is what makes the marker inside it
@@ -61,18 +94,33 @@ else
 fi
 
 # Freeze the hook wiring too. The marker is only as strong as the hook that reads it, and that hook
-# is wired in .claude/settings.json — a file the agent owns as much as the marker. Editing one line
-# there to unwire the guard is quieter than any rm, and a Bash PreToolUse guard cannot even see an
-# Edit-tool change to it. Freezing it means the agent can neither edit, rename, nor delete
-# settings.json while the run is locked; only unlock-loop.sh lifts the flag.
-if [ -f "$SETTINGS" ]; then
-  if freeze "$SETTINGS"; then
-    echo "  frozen: $SETTINGS (the agent cannot unwire the guard while locked)"
+# lives entirely inside .claude/ — a directory the agent owns as much as the marker. Unwiring the
+# guard from in there is quieter than any rm, and a Bash PreToolUse guard cannot even see an
+# Edit-tool change to a file. There are at least three doors, which is why this freezes the
+# subtree rather than a filename:
+#
+#   1. .claude/settings.json          — `disableAllHooks`, or just delete the hooks block.
+#   2. .claude/settings.local.json    — accepts `disableAllHooks` too, sits in the same checkout,
+#                                       and usually does not exist yet, so the agent can CREATE it.
+#   3. .claude/scripts/block-human-gated-actions.sh — edit `exit 0` into the top of the hook and
+#                                       no settings file needs touching at all.
+#
+# Freezing .claude/ and its contents means the agent can neither edit, create, rename, nor delete
+# anything in there while the run is locked; only unlock-loop.sh lifts the flags.
+if [ -d "$CLAUDE_DIR" ]; then
+  if freeze_tree "$CLAUDE_DIR"; then
+    echo "  frozen: $CLAUDE_DIR (whole subtree — the agent cannot unwire the guard while locked)"
+    echo "          this includes settings.json, settings.local.json, and the hook script itself"
   fi
 else
-  echo "  NOTE: $SETTINGS not found — hook wiring not frozen. Is the guard installed in this repo?" >&2
+  echo "  NOTE: $CLAUDE_DIR not found — hook wiring not frozen. Is the guard installed in this repo?" >&2
 fi
 
 echo
 echo "Next:  run /orchestrate <id> as usual. Clear the gate when you act on the card:"
 echo "  sudo $(dirname "${BASH_SOURCE[0]}")/unlock-loop.sh"
+echo
+echo 'While locked, "Allow always" on a permission prompt will fail — Claude Code records that'
+echo "grant in .claude/settings.local.json, which is frozen. That is the lock working, not a"
+echo "fault: a standing allow rule written mid-run is exactly the thing the freeze exists to stop."
+echo "Choose \"Allow once\" for the run, or unlock first if you genuinely want a permanent grant."
