@@ -96,6 +96,19 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
   `./.claude/scripts/loop-status.sh` reports which marker (if any) holds the gate. **Lock when a rogue ship would reach something real and you won't be watching** — solo repos with no downstream review, unattended or overnight runs, direct-to-main. **Skip it** for supervised runs, throwaway branches, or repos whose own branch protection already gates merges; there the `sudo` is friction for nothing and the soft default is enough.
 
+## Acknowledgements
+
+The gate is harder than it was because people took it apart in public.
+
+[u/northbridgedev](https://www.reddit.com/user/northbridgedev/) reviewed the guard in [the r/ClaudeCode thread](https://www.reddit.com/r/ClaudeCode/comments/1wgjq3j/my_agent_deleted_the_file_that_was_stopping_it/) on the original marker-deletion post, and four things here came out of that:
+
+- **The hinge.** A marker the agent cannot delete is worth little while the hook that *reads* it sits in a file the agent owns. That is why the hard lock freezes the hook wiring and not just the marker.
+- **`.claude/settings.local.json`.** Claude Code honours `disableAllHooks` there too, and the file usually does not exist yet — so the agent can create it rather than edit anything. That is why the freeze covers the subtree instead of one filename.
+- **Unlink is a permission on the directory, not on the file.** `chmod 000` a file you own and `rm -f` still removes it. The marker lives in a root-owned *directory* for this reason.
+- **`scripts/tests/test-denial-suggestions.sh`** exists because they proposed it: feed every command a denial message suggests back through the hook, and assert each one passes *and* leaves the marker standing. A block message that hands over a working bypass is its own class of bug, and this repo had one.
+
+They also withdrew one of their own reported cases when it did not reproduce, which is the part of code review nobody writes blog posts about.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
