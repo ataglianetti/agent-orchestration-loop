@@ -28,7 +28,10 @@ State the resolved state back in one line before looping — e.g. `Resuming <id>
 **Two gate modes, and how each is cleared** (this is the human's choice, not yours — you only ever write the soft marker, and only when the gate is not already up):
 
 - **Soft (default):** the loop wrote `.loop-active`. The human clears it with `rm .loop-active` from their own terminal when they act on the card; the next run overwrites it. Strong, but the wall is a list of blocked commands.
-- **Hard (opt-in, `sudo ./.claude/scripts/lock-loop.sh`):** a root-owned marker outside the repo the agent's user cannot remove by any means. The human clears it with `sudo ./.claude/scripts/unlock-loop.sh`. Use it for unattended runs on a repo with no downstream human review. While a hard lock is in force, `.claude/settings.json` is also frozen (immutable) so the guard itself cannot be unwired — if you try to edit it and get a permission error mid-run, that is intentional, not a fault to fix.
+- **Hard (opt-in, `sudo ./.claude/scripts/lock-loop.sh`):** a root-owned marker outside the repo the agent's user cannot remove by any means. The human clears it with `sudo ./.claude/scripts/unlock-loop.sh`. Use it for unattended runs on a repo with no downstream human review. While a hard lock is in force, **the entire `.claude/` subtree is frozen (immutable)** — settings.json, settings.local.json, the hook script, all of it — so the guard cannot be unwired from any direction. Three things follow, and none of them is a fault to fix:
+	- Editing anything under `.claude/` returns a permission error. Intentional. Do not try to work around it, and do not report it as a defect.
+	- Creating a new file under `.claude/` fails too, `settings.local.json` included. Also intentional: the directory is frozen precisely so a new settings file cannot appear.
+	- "Allow always" on a permission prompt fails, because that grant is written to `.claude/settings.local.json`. Ask the human to choose "Allow once", or to unlock if a permanent grant is genuinely wanted.
 
 ## 1. Plan (read-only, once)
 

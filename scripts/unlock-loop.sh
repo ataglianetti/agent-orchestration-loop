@@ -20,26 +20,36 @@ GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
 REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P))"
 KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
 MARKER="$GUARD_DIR/$KEY"
-SETTINGS="${LOOP_SETTINGS:-$REPO/.claude/settings.json}"
+CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
 is_frozen() {  # 0 = immutable flag is set
   if   command -v chflags >/dev/null 2>&1; then ls -ldO "$1" 2>/dev/null | grep -qw schg
   elif command -v lsattr  >/dev/null 2>&1; then lsattr "$1" 2>/dev/null | awk '{print $1}' | grep -q i
   else return 1; fi
 }
-unfreeze() {  # harmless no-op if the file is not frozen
-  if   command -v chflags >/dev/null 2>&1; then chflags noschg "$1" 2>/dev/null || true
-  elif command -v chattr  >/dev/null 2>&1; then chattr -i "$1" 2>/dev/null || true; fi
+# Lift the flags across the whole subtree, directory FIRST (plain -R, no -depth) so the parent is
+# cleared before its children are walked. Mirrors freeze_tree in lock-loop.sh, which goes the
+# other way round. Harmless no-op on anything that was not frozen.
+unfreeze_tree() {
+  local d="$1"
+  [ -d "$d" ] || return 0
+  if   command -v chflags >/dev/null 2>&1; then chflags -R noschg "$d" 2>/dev/null || true
+  elif command -v chattr  >/dev/null 2>&1; then
+    find "$d" -type d -exec chattr -i {} + 2>/dev/null || true
+    find "$d" -type f -exec chattr -i {} + 2>/dev/null || true
+  fi
 }
 
 did=0
 
-# Lift the immutable flag first, and unconditionally — a forgotten lock must never leave
-# settings.json permanently frozen. Report only if it actually had been frozen.
-if [ -e "$SETTINGS" ]; then
-  was_frozen=0; is_frozen "$SETTINGS" && was_frozen=1
-  unfreeze "$SETTINGS"
-  [ "$was_frozen" -eq 1 ] && { echo "  unfroze: $SETTINGS (hook wiring editable again)"; did=1; }
+# Lift the immutable flags first, and unconditionally — a forgotten lock must never leave the
+# .claude subtree permanently frozen, which would lock the human out of their own config too.
+# Report only if it actually had been frozen. The directory's own flag is the signal: freeze_tree
+# sets it last, so if it is set the whole subtree was done.
+if [ -d "$CLAUDE_DIR" ]; then
+  was_frozen=0; is_frozen "$CLAUDE_DIR" && was_frozen=1
+  unfreeze_tree "$CLAUDE_DIR"
+  [ "$was_frozen" -eq 1 ] && { echo "  unfroze: $CLAUDE_DIR (whole subtree — hook wiring editable again)"; did=1; }
 fi
 
 if [ -f "$MARKER" ]; then

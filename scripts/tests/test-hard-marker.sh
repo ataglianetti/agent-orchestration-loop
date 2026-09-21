@@ -68,10 +68,53 @@ LOOP_GUARD_DIR="$TG" bash "$UNLOCK" >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PAS
 # root-owned marker, the freeze itself is proven by the sudo smoke test, not here. This suite
 # verifies the wiring is present: lock freezes the hook config, unlock lifts it, status reports it.
 echo "== the hook-config freeze is wired into lock/unlock/status =="
-grep -q 'chflags schg\|chattr +i' "$LOCK"     && grep -q 'freeze "\$SETTINGS"' "$LOCK"   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop does not freeze the hook config"; }
-grep -q 'chflags noschg\|chattr -i' "$UNLOCK" && grep -q 'unfreeze "\$SETTINGS"' "$UNLOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop does not unfreeze the hook config"; }
-grep -q 'unconditionally' "$UNLOCK"           && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop must unfreeze unconditionally (a forgotten lock must not leave the config frozen)"; }
-grep -q 'is_frozen' "$STATUS"                 && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: loop-status does not report the frozen hook config"; }
+grep -q 'chflags schg\|chattr +i' "$LOCK"        && grep -q 'freeze_tree "\$CLAUDE_DIR"' "$LOCK"     && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop does not freeze the hook config subtree"; }
+grep -q 'chflags -R noschg\|chattr -i' "$UNLOCK" && grep -q 'unfreeze_tree "\$CLAUDE_DIR"' "$UNLOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop does not unfreeze the hook config subtree"; }
+grep -q 'unconditionally' "$UNLOCK"              && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop must unfreeze unconditionally (a forgotten lock must not leave the config frozen)"; }
+grep -q 'is_frozen' "$STATUS"                    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: loop-status does not report the frozen hook config"; }
+
+# The freeze must cover the whole .claude subtree, not one filename. Freezing only
+# .claude/settings.json left two doors open: create .claude/settings.local.json (which also
+# accepts disableAllHooks and usually does not exist yet), or edit the hook script itself in
+# place. An edit that narrows the freeze back to a single file fails here.
+echo "== the freeze targets the subtree, not a single settings file =="
+grep -q 'LOOP_CLAUDE_DIR' "$LOCK" && grep -q 'LOOP_CLAUDE_DIR' "$UNLOCK" && grep -q 'LOOP_CLAUDE_DIR' "$STATUS" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock/unlock/status must agree on CLAUDE_DIR (LOOP_CLAUDE_DIR override)"; }
+if grep -lq 'LOOP_SETTINGS' "$LOCK" "$UNLOCK" "$STATUS" 2>/dev/null; then
+  FAIL=$((FAIL+1)); echo "  FAIL: a single-file LOOP_SETTINGS target is still wired — the subtree freeze replaced it"
+else PASS=$((PASS+1)); fi
+grep -q 'settings.local.json' "$LOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must document why settings.local.json is covered"; }
+grep -q 'find "\$d" -depth' "$LOCK"   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: freeze_tree must set contents before the directory (-depth)"; }
+
+# The kernel semantics the whole design rests on, proven without root by using uchg
+# (owner-clearable) in place of schg (root-only). The two flags differ in WHO may clear them, not
+# in what they block. This is the case that shows why freezing one file was never enough.
+echo "== dir-immutable blocks creation; only file-immutable blocks in-place edit =="
+if command -v chflags >/dev/null 2>&1; then
+  SEM="$TG/sem"; mkdir -p "$SEM/.claude"; printf '{}\n' > "$SEM/.claude/settings.json"
+  chflags uchg "$SEM/.claude" 2>/dev/null
+  touch "$SEM/.claude/settings.local.json" 2>/dev/null
+  if [ -f "$SEM/.claude/settings.local.json" ]; then
+    FAIL=$((FAIL+1)); echo "  FAIL: a new file was created inside an immutable directory"
+  else PASS=$((PASS+1)); fi
+  # Subshell + stderr redirect: a refused `>` is reported by the SHELL, not by printf, so
+  # `printf ... 2>/dev/null >file` still leaks "Operation not permitted". That message is the
+  # assertion succeeding, and it must not look like a suite error.
+  ( printf '{"disableAllHooks":true}\n' > "$SEM/.claude/settings.json" ) 2>/dev/null
+  if grep -q disableAllHooks "$SEM/.claude/settings.json" 2>/dev/null; then
+    PASS=$((PASS+1))   # premise holds: a dir-only freeze does NOT stop an in-place edit
+  else
+    FAIL=$((FAIL+1)); echo "  FAIL: premise wrong — a dir-only freeze was expected to still allow in-place edits"
+  fi
+  chflags uchg "$SEM/.claude/settings.json" 2>/dev/null
+  ( printf '{"clobbered":true}\n' > "$SEM/.claude/settings.json" ) 2>/dev/null
+  if grep -q clobbered "$SEM/.claude/settings.json" 2>/dev/null; then
+    FAIL=$((FAIL+1)); echo "  FAIL: an immutable file was edited in place"
+  else PASS=$((PASS+1)); fi
+  chflags -R nouchg "$SEM" 2>/dev/null; rm -rf "$SEM"
+else
+  echo "  SKIP: no chflags on this platform"
+fi
 
 echo "== is_frozen reports false for an ordinary (unfrozen) file =="
 # Pull is_frozen out of loop-status and exercise its negative case without root.
