@@ -116,6 +116,29 @@ else
   echo "  SKIP: no chflags on this platform"
 fi
 
+# A symlinked .claude is common: people point it at a synced folder so one set of settings
+# follows them between machines. The first subtree freeze walked the link instead of the tree and
+# reported success anyway. These assertions fail against that version.
+echo "== a symlinked .claude is resolved, not walked as a link =="
+grep -q 'CLAUDE_LINK' "$LOCK" && grep -q 'CLAUDE_LINK' "$UNLOCK" && grep -q 'CLAUDE_LINK' "$STATUS" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock/unlock/status must all resolve a symlinked .claude"; }
+grep -q 'chflags -h schg' "$LOCK"    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must freeze the symlink itself so it cannot be repointed"; }
+grep -q 'chflags -h noschg' "$UNLOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop must lift the symlink's own flag"; }
+grep -q 'LOOP_ALLOW_EXTERNAL_CLAUDE_DIR' "$LOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must refuse an out-of-repo target unless explicitly overridden"; }
+
+# The kernel/find behaviour the bug rested on. If any of these three flip, the resolution code
+# above is no longer needed — and if they hold, walking an unresolved link is provably useless.
+echo "== find does not descend a symlink, and [ -d ] does not notice =="
+SL="$TG/sl"; mkdir -p "$SL/real/scripts"; : > "$SL/real/settings.json"; : > "$SL/real/scripts/hook.sh"
+ln -s "$SL/real" "$SL/link"
+[ "$(find "$SL/link" -depth | wc -l | tr -d ' ')" = "1" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: premise wrong — find descended a symlink"; }
+[ -d "$SL/link" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: premise wrong — [ -d ] rejected a symlinked dir"; }
+[ "$(cd "$SL/link" && pwd -P)" = "$(cd "$SL/real" && pwd -P)" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: pwd -P did not resolve the link to its target"; }
+rm -rf "$SL"
+
 echo "== is_frozen reports false for an ordinary (unfrozen) file =="
 # Pull is_frozen out of loop-status and exercise its negative case without root.
 tmpf="$TG/plainfile"; : > "$tmpf"

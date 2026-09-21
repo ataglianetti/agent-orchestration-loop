@@ -88,6 +88,19 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
   One consequence worth knowing before it surprises you mid-run: while locked, **"Allow always" on a permission prompt will fail**, because Claude Code records that grant in `.claude/settings.local.json`. That is the lock working rather than a fault — a standing allow rule written during an unattended run is exactly the thing being prevented. Choose "Allow once", or unlock first if you genuinely want a permanent grant.
 
+  **If your `.claude` is a symlink** — a common setup, where it points at a synced folder so one set of Claude settings follows you between machines — the lock resolves it and freezes the real target, and freezes the link itself so it cannot be repointed at a directory the agent does control. But if that target sits **outside the repo**, `lock-loop.sh` refuses by default:
+
+  ```
+  lock-loop.sh: refusing to lock.
+    .claude resolves to /path/outside/repo, which is outside this repo.
+  ```
+
+  A synced folder is live on your other machines too, and freezing it makes it immutable everywhere at once — a sync client writing into a frozen directory fails confusingly on every device. If the target really is local and safe to freeze, override deliberately:
+
+  ```bash
+  sudo env LOOP_ALLOW_EXTERNAL_CLAUDE_DIR=1 ./.claude/scripts/lock-loop.sh
+  ```
+
   ```bash
   sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
   # ... run /orchestrate <id> as usual; planner and executors need no sudo ...
