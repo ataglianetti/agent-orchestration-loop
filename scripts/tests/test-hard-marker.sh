@@ -124,7 +124,13 @@ grep -q 'CLAUDE_LINK' "$LOCK" && grep -q 'CLAUDE_LINK' "$UNLOCK" && grep -q 'CLA
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock/unlock/status must all resolve a symlinked .claude"; }
 grep -q 'chflags -h schg' "$LOCK"    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must freeze the symlink itself so it cannot be repointed"; }
 grep -q 'chflags -h noschg' "$UNLOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop must lift the symlink's own flag"; }
-grep -q 'LOOP_ALLOW_EXTERNAL_CLAUDE_DIR' "$LOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must refuse an out-of-repo target unless explicitly overridden"; }
+# Warn, never refuse. A symlinked project .claude almost always points outside the repo — that is
+# why it is a symlink — so refusing would block the very case the symlink handling exists for, and
+# a guard that blocks legitimate work trains the reflex to override it.
+grep -q 'WARNING: \$CLAUDE_LINK resolves to' "$LOCK" && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must warn about an out-of-repo target"; }
+if grep -q 'LOOP_ALLOW_EXTERNAL_CLAUDE_DIR' "$LOCK"; then
+  FAIL=$((FAIL+1)); echo "  FAIL: the out-of-repo override is back — warn and proceed, do not gate on a flag"
+else PASS=$((PASS+1)); fi
 
 # The kernel/find behaviour the bug rested on. If any of these three flip, the resolution code
 # above is no longer needed — and if they hold, walking an unresolved link is provably useless.

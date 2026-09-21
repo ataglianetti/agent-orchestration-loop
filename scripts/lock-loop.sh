@@ -58,26 +58,27 @@ if [ -L "$CLAUDE_DIR" ]; then
   }
 fi
 
-# A resolved target OUTSIDE the repo is the synced-settings case, and freezing it is a bigger act
-# than the user asked for: the same directory is very likely live on another machine, and a sync
-# client writing into an immutable folder fails in confusing ways on every device at once. Refuse
-# by default and say why. The override exists because "outside the repo" is not always "shared".
+# A resolved target OUTSIDE the repo is usually the synced-settings case, and freezing it reaches
+# further than the run: the same directory may be live on another machine, and a sync client
+# writing into an immutable folder fails confusingly on every device at once.
+#
+# WARN, do not refuse. An earlier version refused unless an env var was set, and that was the
+# wrong shape. If a project's .claude is a symlink at all, it almost certainly points outside the
+# repo — that is the entire reason to symlink it — so the refusal fired for essentially every
+# real instance of the case it was written for, and sent a legitimate user hunting for a flag. A
+# guard whose false positives block real work trains the reflex to override it, and a reflexive
+# override is worth nothing. Say the consequence plainly and let the person who typed sudo decide;
+# unlock reverses all of it.
 if [ -n "${CLAUDE_DIR:-}" ]; then
   REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P || printf '%s' "$REPO")"
   case "$CLAUDE_DIR/" in
     "$REPO_REAL"/*) : ;;
     *)
-      if [ "${LOOP_ALLOW_EXTERNAL_CLAUDE_DIR:-0}" != "1" ]; then
-        echo "lock-loop.sh: refusing to lock." >&2
-        echo "  $CLAUDE_LINK resolves to $CLAUDE_DIR, which is outside this repo." >&2
-        echo "  That is usually a synced settings folder (Obsidian, Dropbox, dotfiles). Freezing it" >&2
-        echo "  would make it immutable everywhere it syncs, not just for this run, and a sync" >&2
-        echo "  client writing into a frozen folder fails on every machine at once." >&2
-        echo "  If this target really is local to this machine and safe to freeze, re-run with:" >&2
-        echo "    sudo env LOOP_ALLOW_EXTERNAL_CLAUDE_DIR=1 $0" >&2
-        exit 1
-      fi
-      echo "  NOTE: $CLAUDE_LINK resolves outside the repo ($CLAUDE_DIR); freezing it anyway on request." >&2
+      echo "  WARNING: $CLAUDE_LINK resolves to $CLAUDE_DIR, outside this repo." >&2
+      echo "           If that is a synced folder (Obsidian, Dropbox, a dotfiles repo), freezing it" >&2
+      echo "           makes it immutable everywhere it syncs — not just for this run — and a sync" >&2
+      echo "           client writing into a frozen folder can fail on every machine at once." >&2
+      echo "           Untested against a live sync client. Locking anyway; unlock-loop.sh reverses it." >&2
       ;;
   esac
 fi

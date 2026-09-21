@@ -88,18 +88,24 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
   One consequence worth knowing before it surprises you mid-run: while locked, **"Allow always" on a permission prompt will fail**, because Claude Code records that grant in `.claude/settings.local.json`. That is the lock working rather than a fault — a standing allow rule written during an unattended run is exactly the thing being prevented. Choose "Allow once", or unlock first if you genuinely want a permanent grant.
 
-  **If your `.claude` is a symlink** — a common setup, where it points at a synced folder so one set of Claude settings follows you between machines — the lock resolves it and freezes the real target, and freezes the link itself so it cannot be repointed at a directory the agent does control. But if that target sits **outside the repo**, `lock-loop.sh` refuses by default:
+  **If your project's `.claude` is a symlink**, the lock resolves it and freezes the real target, and freezes the link itself so it cannot be repointed at a directory the agent does control. (Symlinking the *user-level* `~/.claude` into a dotfiles repo is the common practice, and the hard lock does not touch it — see the gap noted below. A *project* `.claude` is a link less often, usually because something like Obsidian Sync will not carry dotfolders, so the real directory has to sit at a visible path.) If that target sits **outside the repo**, the lock warns and proceeds:
 
   ```
-  lock-loop.sh: refusing to lock.
-    .claude resolves to /path/outside/repo, which is outside this repo.
+  WARNING: .claude resolves to /path/outside/repo, outside this repo.
+           If that is a synced folder (Obsidian, Dropbox, a dotfiles repo), freezing it
+           makes it immutable everywhere it syncs — not just for this run — and a sync
+           client writing into a frozen folder can fail on every machine at once.
+           Untested against a live sync client. Locking anyway; unlock-loop.sh reverses it.
   ```
 
-  A synced folder is live on your other machines too, and freezing it makes it immutable everywhere at once — a sync client writing into a frozen directory fails confusingly on every device. If the target really is local and safe to freeze, override deliberately:
+  It warns rather than refuses on purpose. A symlinked project `.claude` points outside the repo almost by definition — that is why it is a symlink — so refusing would block the exact case the symlink handling exists for, and send a legitimate user hunting for an override flag. A guard whose false positives block real work teaches you to reach past it, and an override you reach for by reflex is not a control. You typed `sudo`; the consequence is stated and `unlock-loop.sh` reverses all of it.
 
-  ```bash
-  sudo env LOOP_ALLOW_EXTERNAL_CLAUDE_DIR=1 ./.claude/scripts/lock-loop.sh
-  ```
+  **What the hard lock does not cover.** Two things, both deliberate:
+
+  - **`~/.claude/settings.json`.** Claude Code reads user-level settings too, and `disableAllHooks` works there. It runs as the same user as the agent, so it is reachable — but freezing it would make it immutable for every Claude Code session on the machine, not just the locked run. Out of scope for a repo-scoped lock.
+  - **Freezing a genuinely synced folder is untested.** If your `.claude` resolves into one, the lock warns and proceeds. Nobody has checked how a sync client reacts to its directory becoming immutable mid-session — whether it fails loudly, retries quietly, or leaves the other machine inconsistent. The warning says so; heed it rather than the fact that the command succeeded.
+
+  The route that ends this class rather than extending it is [`/etc/claude-code/managed-settings.json`](https://code.claude.com/docs/en/settings) with `allowManagedHooksOnly: true` — root-owned, above user and project settings, and per the docs only managed settings can disable managed hooks. No freezing, and no list of filenames to keep current.
 
   ```bash
   sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
