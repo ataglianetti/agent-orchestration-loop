@@ -88,7 +88,7 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
   One consequence worth knowing before it surprises you mid-run: while locked, **"Allow always" on a permission prompt will fail**, because Claude Code records that grant in `.claude/settings.local.json`. That is the lock working rather than a fault — a standing allow rule written during an unattended run is exactly the thing being prevented. Choose "Allow once", or unlock first if you genuinely want a permanent grant.
 
-  **If your `.claude` is a symlink** — a common setup, where it points at a synced folder so one set of Claude settings follows you between machines — the lock resolves it and freezes the real target, and freezes the link itself so it cannot be repointed at a directory the agent does control. But if that target sits **outside the repo**, `lock-loop.sh` refuses by default:
+  **If your project's `.claude` is a symlink**, the lock resolves it and freezes the real target, and freezes the link itself so it cannot be repointed at a directory the agent does control. (Symlinking the *user-level* `~/.claude` into a dotfiles repo is the common practice, and the hard lock does not touch it — see the gap noted below. A *project* `.claude` is a link less often, usually because something like Obsidian Sync will not carry dotfolders, so the real directory has to sit at a visible path.) But if that target sits **outside the repo**, `lock-loop.sh` refuses by default:
 
   ```
   lock-loop.sh: refusing to lock.
@@ -100,6 +100,13 @@ The gate is a marker file the guard checks. There are two, and the difference is
   ```bash
   sudo env LOOP_ALLOW_EXTERNAL_CLAUDE_DIR=1 ./.claude/scripts/lock-loop.sh
   ```
+
+  **What the hard lock does not cover.** Two things, both deliberate:
+
+  - **`~/.claude/settings.json`.** Claude Code reads user-level settings too, and `disableAllHooks` works there. It runs as the same user as the agent, so it is reachable — but freezing it would make it immutable for every Claude Code session on the machine, not just the locked run. Out of scope for a repo-scoped lock.
+  - **`LOOP_ALLOW_EXTERNAL_CLAUDE_DIR=1` on a genuinely synced folder is untested.** The override will freeze it on request. Nobody has checked how a sync client reacts to its directory becoming immutable mid-session — whether it fails loudly, retries quietly, or leaves the other machine inconsistent. Treat the override as proven for a local out-of-repo path and unproven for a synced one.
+
+  The route that ends this class rather than extending it is [`/etc/claude-code/managed-settings.json`](https://code.claude.com/docs/en/settings) with `allowManagedHooksOnly: true` — root-owned, above user and project settings, and per the docs only managed settings can disable managed hooks. No freezing, and no list of filenames to keep current.
 
   ```bash
   sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
