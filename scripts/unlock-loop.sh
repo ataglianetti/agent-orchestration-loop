@@ -22,6 +22,12 @@ KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
 MARKER="$GUARD_DIR/$KEY"
 CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
+# Resolve a symlinked .claude exactly as lock-loop.sh does, or unlock walks the link instead of
+# the real tree and leaves the contents frozen — a lock nobody can lift without chflags by hand.
+# No outside-the-repo refusal here: unlock must always be able to undo whatever lock did.
+CLAUDE_LINK="$CLAUDE_DIR"
+[ -L "$CLAUDE_DIR" ] && CLAUDE_DIR="$(cd "$CLAUDE_DIR" 2>/dev/null && pwd -P || printf '%s' "$CLAUDE_DIR")"
+
 is_frozen() {  # 0 = immutable flag is set
   if   command -v chflags >/dev/null 2>&1; then ls -ldO "$1" 2>/dev/null | grep -qw schg
   elif command -v lsattr  >/dev/null 2>&1; then lsattr "$1" 2>/dev/null | awk '{print $1}' | grep -q i
@@ -46,6 +52,15 @@ did=0
 # .claude subtree permanently frozen, which would lock the human out of their own config too.
 # Report only if it actually had been frozen. The directory's own flag is the signal: freeze_tree
 # sets it last, so if it is set the whole subtree was done.
+# Lift the link's own flag FIRST. On macOS an schg symlink cannot be replaced, and leaving it set
+# would survive the unlock invisibly — the tree would look released while .claude stayed pinned.
+if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && command -v chflags >/dev/null 2>&1; then
+  if ls -ldO "$CLAUDE_LINK" 2>/dev/null | grep -qw schg; then
+    chflags -h noschg "$CLAUDE_LINK" 2>/dev/null \
+      && { echo "  unfroze: $CLAUDE_LINK (the symlink itself)"; did=1; }
+  fi
+fi
+
 if [ -d "$CLAUDE_DIR" ]; then
   was_frozen=0; is_frozen "$CLAUDE_DIR" && was_frozen=1
   unfreeze_tree "$CLAUDE_DIR"

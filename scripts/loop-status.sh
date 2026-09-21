@@ -14,6 +14,12 @@ HARD="$GUARD_DIR/$KEY"
 SOFT="$REPO/.loop-active"
 CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
+# Resolve a symlinked .claude the same way lock/unlock do. Checking the link instead of its
+# target would report "not frozen" for a tree that is frozen, which is the wrong answer in the
+# more dangerous direction — it invites a second lock, or hides a stuck one.
+CLAUDE_LINK="$CLAUDE_DIR"
+[ -L "$CLAUDE_DIR" ] && CLAUDE_DIR="$(cd "$CLAUDE_DIR" 2>/dev/null && pwd -P || printf '%s' "$CLAUDE_DIR")"
+
 is_frozen() {  # 0 = immutable flag is set on the path
   if   command -v chflags >/dev/null 2>&1; then ls -ldO "$1" 2>/dev/null | grep -qw schg
   elif command -v lsattr  >/dev/null 2>&1; then lsattr "$1" 2>/dev/null | awk '{print $1}' | grep -q i
@@ -32,7 +38,10 @@ if [ "$soft_present" -eq 1 ] || [ "$hard_present" -eq 1 ]; then
   echo "ACTIVE"
   [ "$hard_present" -eq 1 ] && echo "  hard: $HARD (root-owned; clear with: sudo ./.claude/scripts/unlock-loop.sh)"
   [ "$soft_present" -eq 1 ] && echo "  soft: $SOFT (clear with: rm '$SOFT')"
-  [ "$frozen" -eq 1 ]       && echo "  hook wiring frozen: $CLAUDE_DIR (whole subtree; unlock lifts it)"
+  if [ "$frozen" -eq 1 ]; then
+    echo "  hook wiring frozen: $CLAUDE_DIR (whole subtree; unlock lifts it)"
+    [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && echo "    via symlink: $CLAUDE_LINK"
+  fi
   exit 0
 fi
 

@@ -35,6 +35,53 @@ MARKER="$GUARD_DIR/$KEY"
 # tests, same as LOOP_GUARD_DIR.
 CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
+# .claude is very often a SYMLINK. People point it at a synced folder (Obsidian, Dropbox, a
+# dotfiles repo) so one set of Claude settings follows them between machines. That breaks a naive
+# subtree freeze in a way that fails LOUD-looking and silent-acting, which is worse than failing:
+#
+#   find <symlink> -depth   returns ONLY the link. It does not descend, so nothing inside is
+#                           frozen, while the command still exits 0.
+#   [ -d <symlink> ]        is TRUE, so a guard clause on it passes and the script cheerfully
+#                           reports a subtree freeze that never happened.
+#   chflags <symlink>       follows the link and flags the TARGET directory. So new files are
+#                           blocked, but in-place edits to settings.json and to the hook script
+#                           are not — exactly the two holes the subtree freeze exists to close.
+#
+# So resolve the link and operate on the real path. CLAUDE_LINK keeps the original so the link
+# itself can be frozen too (chflags -h), which stops the agent repointing .claude at a directory
+# it controls — freezing a target does nothing about swapping which target is named.
+CLAUDE_LINK="$CLAUDE_DIR"
+if [ -L "$CLAUDE_DIR" ]; then
+  CLAUDE_DIR="$(cd "$CLAUDE_DIR" 2>/dev/null && pwd -P)" || {
+    echo "lock-loop.sh: $CLAUDE_LINK is a symlink that does not resolve. Refusing to lock." >&2
+    exit 1
+  }
+fi
+
+# A resolved target OUTSIDE the repo is the synced-settings case, and freezing it is a bigger act
+# than the user asked for: the same directory is very likely live on another machine, and a sync
+# client writing into an immutable folder fails in confusing ways on every device at once. Refuse
+# by default and say why. The override exists because "outside the repo" is not always "shared".
+if [ -n "${CLAUDE_DIR:-}" ]; then
+  REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P || printf '%s' "$REPO")"
+  case "$CLAUDE_DIR/" in
+    "$REPO_REAL"/*) : ;;
+    *)
+      if [ "${LOOP_ALLOW_EXTERNAL_CLAUDE_DIR:-0}" != "1" ]; then
+        echo "lock-loop.sh: refusing to lock." >&2
+        echo "  $CLAUDE_LINK resolves to $CLAUDE_DIR, which is outside this repo." >&2
+        echo "  That is usually a synced settings folder (Obsidian, Dropbox, dotfiles). Freezing it" >&2
+        echo "  would make it immutable everywhere it syncs, not just for this run, and a sync" >&2
+        echo "  client writing into a frozen folder fails on every machine at once." >&2
+        echo "  If this target really is local to this machine and safe to freeze, re-run with:" >&2
+        echo "    sudo env LOOP_ALLOW_EXTERNAL_CLAUDE_DIR=1 $0" >&2
+        exit 1
+      fi
+      echo "  NOTE: $CLAUDE_LINK resolves outside the repo ($CLAUDE_DIR); freezing it anyway on request." >&2
+      ;;
+  esac
+fi
+
 # Make a path immutable even against its owner: schg (macOS) / +i (Linux). Both need root to set
 # AND to clear, so a non-root agent can neither modify the path nor lift the flag.
 freeze() {
@@ -107,10 +154,22 @@ fi
 #
 # Freezing .claude/ and its contents means the agent can neither edit, create, rename, nor delete
 # anything in there while the run is locked; only unlock-loop.sh lifts the flags.
+# -d (not -L -a -d): CLAUDE_DIR is the RESOLVED path by now, so this can no longer pass on a
+# symlink whose contents were never walked.
 if [ -d "$CLAUDE_DIR" ]; then
   if freeze_tree "$CLAUDE_DIR"; then
     echo "  frozen: $CLAUDE_DIR (whole subtree — the agent cannot unwire the guard while locked)"
     echo "          this includes settings.json, settings.local.json, and the hook script itself"
+    # Freeze the LINK too, or the agent repoints .claude at a directory it does control and the
+    # frozen target stops being the one Claude Code reads. -h flags the link, not its target.
+    if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ]; then
+      if command -v chflags >/dev/null 2>&1 && chflags -h schg "$CLAUDE_LINK" 2>/dev/null; then
+        echo "  frozen: $CLAUDE_LINK (the symlink itself — cannot be repointed while locked)"
+      else
+        echo "  WARNING: $CLAUDE_LINK is a symlink and could not be frozen (chattr cannot flag a" >&2
+        echo "           symlink on Linux). The target is frozen, but the link could be repointed." >&2
+      fi
+    fi
   fi
 else
   echo "  NOTE: $CLAUDE_DIR not found — hook wiring not frozen. Is the guard installed in this repo?" >&2
