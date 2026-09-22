@@ -8,7 +8,7 @@ The machine-routable output the adversarial-review phase emits each loop round, 
 
 ## 1) The artifact
 
-The review phase writes `REVIEW.md` in the workstream folder (`docs/execution/active/<id>/REVIEW.md`), **append-per-round**: each loop round adds a new `## Round N` block. Orchestrate reads the **last** block to route the current round; earlier blocks are the audit trail.
+The review phase writes `REVIEW.md` in the workstream folder (`docs/execution/active/<id>/REVIEW.md`), **append-per-round**: each loop round adds a new `## Round N` block, written once at the close of the round. Orchestrate routes off the **last** block, but it **reads every block** — earlier blocks are not merely an audit trail, they are the **ledger**: replaying their `Carried:` lines reconstructs the seen-set (every `F#` ever raised and its current disposition), which is what stops settled findings from being re-litigated every round.
 
 Two destinations, by audience:
 
@@ -21,32 +21,45 @@ Adding `REVIEW.md` is the one schema change to the workstream spine; everything 
 
 ## 2) Verdict block format
 
-Each `## Round N` block has three parts: the verdict line, the findings table, and per-finding detail.
+Each `## Round N` block has four parts: the verdict line, the carry lines, the findings table, and per-finding detail.
 
 ```markdown
 ## Round N — YYYY-MM-DD
 
 VERDICT: CONCERNS
 Personas: adversarial-reviewer, run, code-review (3 independent passes)
+Carried: settled — resolved F1, F5 · parked F4 → R-003 · rejected F7
+Carried: open — F6
+Seen-set: F1–F9 · 9 findings · 6 terminal, 3 open
+Progress: 3 settled, 2 new, 1 suppressed re-raise
 
-| ID  | SEVERITY         | reachability       | consensus | FLAG-HUMAN | summary                          |
-| --- | ---------------- | ------------------ | --------- | ---------- | -------------------------------- |
-| F1  | CRITICAL-ON-FLIP | dormant-at-default | 2/3       | no         | unbounded text cache             |
-| F2  | WARNING          | live               | 1/3       | no         | N+1 fetch in track enrichment    |
-| F3  | NOTE             | live               | 3/3       | no         | inconsistent error-log prefix    |
+| ID  | SEVERITY         | reachability       | consensus | FLAG-HUMAN | disposition        | summary                       |
+| --- | ---------------- | ------------------ | --------- | ---------- | ------------------ | ----------------------------- |
+| F8  | CRITICAL-ON-FLIP | dormant-at-default | 2/3       | no         | open               | unbounded text cache          |
+| F9  | NOTE             | live               | 3/3       | no         | open               | inconsistent error-log prefix |
+| F2  | WARNING          | live               | 1/3       | no         | re-raised → open   | N+1 fetch — now on the default path (reachability dormant→live) |
+| F3  | NOTE             | test-only          | 1/3       | no         | re-raised → parked | settled round 2 (R-002); unchanged severity, symbol untouched this round |
 
 ### Detail
 
-**F1 — unbounded text cache** (`src/lib/cache.ts:42`)
+**F8 — unbounded text cache** (`src/lib/cache.ts` · `TextCache.put()` · L42)
 Cache has no eviction; grows without bound. Dormant today because the caching flag
 defaults off. Becomes CRITICAL if `ENABLE_TEXT_CACHE` is ever flipped on in prod.
 Raised by: adversarial-reviewer, run.
 
-**F2 — N+1 fetch** (`src/lib/enrich.ts:88`) ...
+**F2 — RE-RAISED → open** (`src/lib/enrich.ts` · `enrichTracks()`)
+Parked round 2 at `dormant-at-default`. The round-4 wiring put `enrichTracks()` on the
+default request path — escape hatch: reachability went live. Routed as a fresh WARNING.
+
+**F3 — RE-RAISED → parked** (`tests/lib/enrich.test.ts` · `describe("enrich")`)
+Same claim as round 2 (`NOTE`, `test-only`, R-002). Severity unchanged, reachability
+unchanged, and this round's diff did not touch the anchor symbol. Suppressed, not re-routed.
 ```
 
-- **IDs are stable across rounds** (`F1`, `F2`, …) — decoupled from severity so a finding can be tracked even if its severity changes ("F1 resolved in round 3"). Severity lives in its own column. (This is why we don't use the brief's illustrative `C1`/`W1` prefixes — `C1` becomes `F1` with `SEVERITY: CRITICAL`.)
-- A finding that was open in round N−1 and is now fixed appears in round N's detail as `F1 — RESOLVED` (one line), so the trail shows convergence.
+- **IDs are stable across rounds** (`F1`, `F2`, …) — decoupled from severity so a finding can be tracked even if its severity changes. Severity lives in its own column; lifecycle lives in `disposition`. (This is why we don't use the brief's illustrative `C1`/`W1` prefixes — `C1` becomes `F1` with `SEVERITY: CRITICAL`.)
+- **The findings table lists findings raised *this* round.** Earlier findings are not re-listed — their state lives in the `Carried:` lines. The single exception is a **re-raise**, which carries an existing `F#` back into the table because a re-raise is new evidence about an old finding.
+- **Every finding's Detail entry carries an anchor**: `` (`path/to/file.ts` · `symbolName()` · L42-58) ``. The symbol is the cross-round identity; the line range is a reading hint and is **not** part of any matching key — a fix moves every line below it, and a fix that *is* an extraction moves the code to another file.
+- **The `Carried:` / `Seen-set:` / `Progress:` lines are mandatory in every block**, including round 1 (`Carried: settled — none`). `Carried: settled` lists only *transitions since the previous block*, so each `F#` appears in exactly one settled list across the whole file — growth is O(findings), not O(rounds × findings). `Seen-set:` is the **checksum**: `terminal + open` must equal the finding count, and the count must equal the highest `F#`. A hand-maintained ledger with no checksum is a cell that rots.
 
 ---
 
@@ -85,13 +98,30 @@ Set `yes` when the finding turns on a judgment a code reviewer (or orchestrate) 
 
 Do **not** set it for ordinary engineering correctness — that's orchestrate + executor's job to resolve. `FLAG-HUMAN` is a *recommendation to escalate*; orchestrate still owns the decision to pause.
 
+### disposition — *where the finding is in its lifecycle*
+
+| Token | Terminal | Meaning |
+| --- | --- | --- |
+| `open` | no | Raised and not settled — a fix is queued, or a `FLAG-HUMAN` awaits a ruling. The only state that counts toward `VERDICT`. |
+| `resolved` | yes | Fix landed **and** a later round's review over the fix diff did not re-raise it. Never assertable in the round the fix lands. |
+| `parked` | yes | Real, accepted, deferred — with an `R-###` row in `RISKS_AND_BLOCKERS.md`. Name it: `parked F4 → R-003`. |
+| `rejected` | yes | Not a bug — false positive, misread, or a deliberate design the reviewer didn't know about. |
+| `duplicate` | yes | Real, but the same issue as an existing finding. Name it: `duplicate F31 → F26`. Distinct from `rejected`: a duplicate of an **open** finding is still an open problem. |
+| `re-raised → <outcome>` | depends | Normalization matched this round's raw finding to an `F#` that already held a terminal disposition. `<outcome>` is either that same terminal token (**suppressed** — the call stands) or `open` (**reopened** — orchestrate's escape hatch fired, see `orchestrate.md` 2d). |
+
+There are exactly two cell forms: a bare token, or `re-raised → <token>`. Nothing else parses.
+
+A terminal disposition is a **commitment**, not a summary: it is what lets the next round skip re-routing. Don't write one you're not prepared to have the loop act on for the rest of the run.
+
 ### VERDICT — *the round's overall gate*
 
 | Token | When | 
 | --- | --- |
-| `CLEAN` | Nothing above `NOTE` remains open. The loop may exit (pending orchestrate's approval card). |
-| `CONCERNS` | Findings exist, but none are `live` `CRITICAL` and none are `FLAG-HUMAN`. Orchestrate auto-resolves/parks per policy, then re-reviews. |
-| `BLOCK` | At least one `CRITICAL` at `live` reachability, **or** at least one `FLAG-HUMAN`. Must be addressed before the round can reach `CLEAN`. |
+| `CLEAN` | Nothing above `NOTE` has disposition `open`. The loop may exit (pending orchestrate's approval card). |
+| `CONCERNS` | `open` findings exist, but none are `live` `CRITICAL` and none are `FLAG-HUMAN`. Orchestrate auto-resolves/parks per policy, then re-reviews. |
+| `BLOCK` | At least one **`open`** `CRITICAL` at `live` reachability, **or** at least one **`open`** `FLAG-HUMAN`. Must be addressed before the round can reach `CLEAN`. |
+
+**`VERDICT` is derived from the open set, not from the round's table.** A finding with a terminal disposition is not open — *including one re-raised and suppressed this round*. A suppressed `re-raised → parked` CRITICAL does not force `BLOCK`; if it did, one parked finding the reviewer keeps rediscovering would hold the loop at `BLOCK` forever, which is the failure this ledger exists to prevent. A `re-raised → open` finding (escape hatch fired) counts exactly as a new finding of that severity would.
 
 ---
 
@@ -113,16 +143,25 @@ Each pass produces raw findings in its own format. They are reconciled in the ne
 
 ## 5) Normalization (raw passes → one verdict block)
 
-A normalize step (orchestrate, or a thin sub-agent it spawns) merges the three passes into the single block:
+A normalize step (orchestrate, or a thin sub-agent it spawns) merges the passes into the single block. **This step runs downstream of assessment and never feeds anything back into it** — the passes have already returned, and they saw only the diff.
 
-1. **Translate** each pass's findings into the contract vocab (assign `SEVERITY` + `reachability` per the tables above; assess `FLAG-HUMAN`).
-2. **Dedup** by `(file, approximate line, issue class)`. The same underlying issue raised by multiple passes is one finding.
+0. **Build the seen-set first.** Read **every** prior `## Round` block and replay its `Carried:` lines into a map of `F# → (disposition, severity-at-settlement, reachability-at-settlement, anchor, claim)`. Verify the total against the last block's `Seen-set:` line. This happens **before any `F#` is assigned** — the seen-set is what a new raw finding is matched against.
+1. **Translate** each pass's findings into the contract vocab (assign `SEVERITY` + `reachability` per the tables above; assess `FLAG-HUMAN`; record the **anchor** — file + enclosing symbol — and a one-sentence **claim**, the invariant being violated).
+2. **Dedup, in two directions.**
+	- *Within the round*, across the concurrent passes: by `(file, approximate line, issue class)`. The same underlying issue raised by multiple passes is one finding.
+	- *Across rounds*, against the whole seen-set: match on **anchor + issue class** (file + enclosing symbol, same issue class). Never match across differing issue classes — a `test-only` coverage gap and a `live` correctness bug at one symbol are two findings. Line numbers are **not** a cross-round key.
+	- **A claim-only match keeps the ID but never suppresses.** When two findings share an invariant at *different* anchors (same crowd-out, different retrieval arm; same race, different call site), record the relationship — reuse the `F#`, write `re-raised → open` — and let orchestrate route it normally. Different code is different code: the earlier ruling was about a symbol this finding does not touch, so it cannot settle it. This tier exists to keep the ledger coherent, not to skip work.
+	- **When unsure, issue a new `F#`.** Bias toward a false miss. A false miss costs one round of re-routing and is recovered next round with `duplicate`; a false match can bury a real new bug inside a settled finding.
 3. **Severity = the max** any pass assigned it. Don't let one lenient pass mask a critical. (When in doubt between two tiers, take the higher.)
-4. **consensus = M/N** — how many of the N passes independently surfaced it. `1/3` is thin (could be a false positive, could be a real blind-spot catch); `3/3` is strong.
+4. **consensus = M/N** — how many of the N passes independently surfaced it. `1/3` is thin (could be a false positive, could be a real blind-spot catch); `3/3` is strong. Consensus is computed over **this round's** passes, whatever the finding's history.
 5. **FLAG-HUMAN = yes if any** pass flagged it. Conservative — a human call surfaced by one reviewer is still a human call.
-6. **Derive VERDICT** per §3's table from the merged set.
+6. **Assign dispositions.** A match to an `F#` holding a terminal disposition is written `re-raised → …`; orchestrate's 2d decides the outcome. Unmatched findings get the next free `F#` and disposition `open`.
+7. **Derive VERDICT** per §3's table **from the open set**.
+8. **Write the `Carried:` / `Seen-set:` / `Progress:` lines** from the seen-set as updated by this round.
 
-Stable IDs carry across rounds: a finding open last round keeps its ID; new findings get the next free `F#`.
+Stable IDs carry across rounds by the matching procedure in step 2 — that procedure, not good intentions, is what makes "stable" true. A finding open last round keeps its ID; a settled finding that resurfaces keeps its ID *and* its disposition.
+
+**Matching is one judgment with no consensus behind it, so it is capped.** A re-raise at full consensus (`N/N` of the passes actually run) is never suppressed on a match alone — orchestrate routes it or stops (2d). The ledger may overrule one reviewer's memory; it may never overrule all of them at once.
 
 ---
 
@@ -135,8 +174,10 @@ Orchestrate reads the latest `## Round N` block and applies its own **severity�
 - `WARNING` → fix if cheap, else park.
 - `NOTE` → auto-fix trivial, log the rest.
 - Any `FLAG-HUMAN: yes` → pause the loop, surface on the approval card.
+- `re-raised` with a terminal outcome → **not routed**; the call stands.
+- `re-raised → open` (severity rose, reachability went live, the round's diff touched the anchor symbol, the re-raise is at full consensus, or the match was claim-only) → routed by its severity row, exactly as a new finding.
 
-The contract's job is to make those tokens trustworthy and uniform. It does **not** define the actions — that's orchestrate. Where work is reversible (SaaS, flags, dark-launch, one-commit reverts), orchestrate auto-resolves aggressively; the human gates are reserved for the irreversible calls (money, contracts, scope, security posture), not routine engineering.
+Orchestrate reads the **latest** block to route, and **every** block to build the seen-set. The contract's job is to make those tokens trustworthy and uniform. It does **not** define the actions — that's orchestrate. Where work is reversible (SaaS, flags, dark-launch, one-commit reverts), orchestrate auto-resolves aggressively; the human gates are reserved for the irreversible calls (money, contracts, scope, security posture), not routine engineering.
 
 ---
 

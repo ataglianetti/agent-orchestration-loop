@@ -16,10 +16,10 @@ Read first: `docs/execution/CLAUDE_ORCHESTRATION_GUIDE.md` (repo rules), `docs/e
 
 Pick the workstream id from `$ARGUMENTS`. Then:
 
-- **If `docs/execution/active/<id>/` exists → RESUME.** Read `README.md` (incl. `## Loop Config`), `WORKBOARD.md`, `ACCEPTANCE_CRITERIA.md`, the last `## Round N` of `RUN_LOG.md` and `REVIEW.md`, `DECISIONS.md`, `RISKS_AND_BLOCKERS.md`. Reconstruct: current round number, what's Done/In Progress, the last `VERDICT`, open findings (by stable `F#`), and any pending `FLAG-HUMAN` pause. **Self-heal:** if `REVIEW.md` is missing, copy it from `docs/execution/templates/REVIEW.template.md`; if `## Loop Config` is absent, use defaults (`round_cap: 5`, `posture: aggressive`, `escalate_to_engineer: off`).
+- **If `docs/execution/active/<id>/` exists → RESUME.** Read `README.md` (incl. `## Loop Config`), `WORKBOARD.md`, `ACCEPTANCE_CRITERIA.md`, the last `## Round N` of `RUN_LOG.md`, `DECISIONS.md`, `RISKS_AND_BLOCKERS.md`, and **every `## Round` block of `REVIEW.md`** — not just the last. Replay the `Carried:` lines in order to rebuild the **seen-set**: every `F#` ever raised and its current disposition. Cross-check the total against the last block's `Seen-set:` line; if they disagree, trust the replay and say so in the resume line. Reconstruct: current round number, what's Done/In Progress, the last `VERDICT`, the **open** findings by stable `F#`, the **terminal** ones you must not re-litigate, and any pending `FLAG-HUMAN` pause. **Self-heal:** if `REVIEW.md` is missing, copy it from `docs/execution/templates/REVIEW.template.md`; if `## Loop Config` is absent, use defaults (`round_cap: 5`, `posture: aggressive`, `escalate_to_engineer: off`).
 - **Else → INIT.** Run `./.claude/scripts/init-workstream.sh <id>`, then write `README.md` (objective + `## Loop Config`) and `ACCEPTANCE_CRITERIA.md` from the goal. If the goal is a **vault note path**, record that path in `README.md` so the intent source survives a resume.
 
-State the resolved state back in one line before looping — e.g. `Resuming <id> at round 3; last verdict CONCERNS; 2 open findings (F1, F4).` or `Initialized <id>.`
+State the resolved state back in one line before looping — e.g. `Resuming <id> at round 3; last verdict CONCERNS; seen-set F1–F12 (9 terminal, 3 open: F4, F6, F11).` or `Initialized <id>.`
 
 **Create the run marker:** first check the gate — run `./.claude/scripts/loop-status.sh`. If it reports `ACTIVE`, the human has **locked** this run (a hard, root-owned marker is already in force) — do not write anything, the gate is already up. If it reports `INACTIVE`, write `.loop-active` at the repo root before any execution. Either way, while the gate is active a PreToolUse hook (`.claude/scripts/block-human-gated-actions.sh`) blocks `gh pr create` / `gh pr merge` / `git push` — so the loop *physically cannot* open or merge a PR, regardless of what it concludes.
 
@@ -64,7 +64,9 @@ First classify the round's diff to set **review depth** — match the rigor to w
 
 A guardrail / contract / security touch **always forces Deep**, regardless of size. Run the passes **independently** over the round's diff (`git diff`), without sharing findings between them. If a lighter tier surfaces a borderline, `CRITICAL`, or `FLAG-HUMAN` finding, **escalate one tier** (add a pass) before routing — cheap depth where it's safe, full depth where it bites.
 
-Normalize the passes into one block and **append** it to `REVIEW.md` as `## Round N`: the `VERDICT` line, the findings table (`F# | SEVERITY | reachability | consensus | FLAG-HUMAN | summary`), and per-finding detail. Severity = the max any pass assigned; consensus = M/N (of the passes actually run); `FLAG-HUMAN` = yes if any pass flagged it. The prose also goes to `RUN_LOG.md` — **never surfaced to the PM directly.**
+**A review pass's input is the round's diff, and nothing else.** Never hand a pass the seen-set, the `Carried:` lines, or a prior disposition "so it doesn't re-find things." The ledger below lives in normalization, downstream of assessment — that separation is what keeps the passes independent, and independence is the whole basis of the consensus number.
+
+Normalize the passes into one block and **append** it to `REVIEW.md` as `## Round N`: the `VERDICT` line, the `Carried:` / `Seen-set:` / `Progress:` lines, the findings table (`F# | SEVERITY | reachability | consensus | FLAG-HUMAN | disposition | summary`), and per-finding detail. Severity = the max any pass assigned; consensus = M/N (of the passes actually run); `FLAG-HUMAN` = yes if any pass flagged it. **Before assigning any `F#`, build the seen-set** by reading every prior `## Round` block, and match each raw finding against it per `REVIEW_CONTRACT.md` §5 — a finding that already has an `F#` keeps it. **Append the block once, at the close of the round, with 2d's routing outcomes already written into the `disposition` column** — `REVIEW.md` stays append-only: one write per round, never a rewrite. The prose also goes to `RUN_LOG.md` — **never surfaced to the PM directly.**
 
 ### 2d. Route — your severity→action policy (you own this; the reviewer only assessed)
 Where the repo's posture is aggressive (reversible work — see Per-repo specifics), route **aggressively**:
@@ -75,10 +77,25 @@ Where the repo's posture is aggressive (reversible work — see Per-repo specifi
 | `CRITICAL-ON-FLIP` / `dormant-at-default` | Fix if cheap + safe; else park on the flip-gate in `RISKS_AND_BLOCKERS.md`. |
 | `WARNING` | Fix if cheap; else park in `RISKS_AND_BLOCKERS.md`. |
 | `NOTE` | Auto-fix trivial; log the rest. |
+| matched to an `F#` with a terminal disposition (`re-raised`) | **Do not re-route.** Record it as `re-raised → <its existing disposition>`, one Detail line citing the round that settled it. No executor, no new `R-###`, no `DECISIONS.md` row — the call was already made. **Unless the escape hatch fires** (below). |
 | any `FLAG-HUMAN: yes` | **Hard stop** — write the card, end the run; never rule on it (see below). |
 | executor "your call?" | You answer (tests green + data-backed = proceed); log to `DECISIONS.md`. |
 
 Record every routing decision (and every auto-resolved critical) in `DECISIONS.md`. Fixes are executor Tasks; after a fix, the loop re-reviews (back to 2c) — never mark a fixed critical resolved without a fresh review pass confirming it.
+
+**Re-raises — and the escape hatch.** A settled call is settled **at the severity it was settled at**, not forever. When normalization matches a raw finding to an `F#` that already holds a terminal disposition (`resolved` / `parked` / `rejected` / `duplicate`), suppress it: write the row as `re-raised → <that same disposition>`, name the round that settled it, and move on. Dedupe against everything seen — not just against what was confirmed. A rejected or parked finding that resurfaces every round is re-routed from scratch every round, the loop never runs dry, and `round_cap` is spent re-litigating calls you already made.
+
+**Route it normally anyway — `re-raised → open`, then apply the severity rows above — when ANY of these hold:**
+
+- **Severity increased** over the severity it was settled at (`NOTE` → `WARNING`, `WARNING` → `CRITICAL-ON-FLIP` / `CRITICAL`). New information about how bad it is reopens the call.
+- **Reachability went live** — it was settled at `dormant-at-default` / `test-only` / `boundary-only` / `unreachable` and is now `live`. A flag flipped, a guard came out, the dormant path got wired. "Parked because it can't fire" expires the moment it can.
+- **This round's diff touched the anchor symbol.** You edited the code the ruling was about, so the ruling is about different code. Check it mechanically (`git diff -U0 -- <file>`), don't reason about it. This is the guard against a bad match burying a genuinely new bug at an old location.
+- **The re-raise is at full consensus** — every pass actually run surfaced it independently this round (`N/N`). Route it, or stop and say the matcher and the reviewers disagree. **The ledger may overrule one reviewer's memory; it may never overrule all of them at once.** Matching is a single judgment with no consensus behind it, and unanimous independent agreement on current code is the strongest signal the stack produces — a lone matcher does not get to delete it.
+- **The match was claim-only** — same invariant, different anchor (`REVIEW_CONTRACT.md` §5). Suppression requires an anchor match. A finding at a symbol the old ruling never covered is new work, whatever it rhymes with.
+
+**`FLAG-HUMAN` on a re-raise, two cases — do not collapse them.** If the finding was settled by a **PM ruling recorded in `DECISIONS.md`**, suppress it and cite that row; the ruling is a real human event, and re-halting on it would trap the loop against a decision that has already been made. If it was settled by **your own** `rejected` / `parked` call and a reviewer now flags it as a human call, that is new information about its human-ness — **stop and write the card**, per the rules below. Never suppress a `FLAG-HUMAN` on the strength of a ruling you made yourself.
+
+**Suppression is never invisible.** Add one line to the `RUN_LOG.md` round entry: `Suppressed re-raises: F9 (parked R-009, round 4), F20 (rejected, round 2).` The loop declining to act is a routing decision like any other, and it goes on the record — in `RUN_LOG.md`, not `DECISIONS.md`, because nothing was decided.
 
 **On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#` — the only things blocking — fill §1–3 for context with depth linked in §5, link the card from `README.md`, **leave the run marker in place**, and **end the run**. Do not rule on the finding, resolve it, or proceed past it.
 
@@ -98,7 +115,9 @@ High = "verified three ways, all agree." Low = "thin — one reviewer, no live t
 
 ### 2f. Loop control
 - `VERDICT == CLEAN` **and** all gates pass → exit to **step 3**.
-- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop. No clean exit.
+- **Run dry** — the round's `Carried: settled` delta is empty and the table holds no new `F#` above `NOTE` → the review axis has converged; treat as `CLEAN` for loop control and exit to **step 3** if the gates pass.
+- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read + **the per-round `settled / new` progress read**, so the PM can tell a converging run from a stuck one), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop. No clean exit.
+- **Two consecutive rounds whose only review content is suppressed re-raises** → stop and say so on the card. That is a normalizer defect, not non-convergence: the reviewer keeps raising what you keep suppressing, so one of you is wrong and a human should look. **Suppressed re-raises never count as progress, and they never count against it** — a round is judged on `settled` vs `new`. Do **not** let a suppressed-only round skip the round counter; an over-matching normalizer would then suppress everything and loop forever against a cap that never advances.
 - A `FLAG-HUMAN` paused the loop → stop, surface pending.
 - Otherwise → next round (back to 2a: execute fixes, then the next wave).
 
@@ -133,7 +152,8 @@ Opening the PR, merging, and relocating the workstream to `done/` are **the PM's
 - **The reviewer assesses; you decide routing.** Never let a review pass authorize or apply its own fix.
 - **Never act as the PM.** `CLEAN` means *ready for the PM*, not *approved*. The loop never records an approval or ruling, never clears a `FLAG-HUMAN`, and never opens a PR or merges. Writing an approval the PM didn't give is fabrication — the worst failure this loop can commit.
 - **No "done" without evidence** in `TEST_RESULTS.md`. Coverage gate is a gate, not a formality.
-- **Append-only** `RUN_LOG.md` (one entry per round) and `REVIEW.md` (one block per round). Stable `F#` IDs across rounds.
+- **Append-only** `RUN_LOG.md` (one entry per round) and `REVIEW.md` (one block per round, written once at the close of the round). Stable `F#` IDs across rounds, assigned against the **whole-file seen-set** — never against the last block alone. **Dedupe against everything seen, not just against what was confirmed:** a finding with a terminal disposition is settled at the severity it was settled at, and does not get re-routed unless the escape hatch fires (2d).
+- **The ledger never reaches a reviewer.** Review passes see the round's diff; the seen-set enters at normalization and the resume replay is read by you, the orchestrator. Feeding prior findings into a pass would trade a cheap re-litigation for a correlated blind spot.
 - **Factual only** — no invented owners, dates, or test counts (guide / workstream conventions).
 - **Bounded delegation** — pass executors only their file scope + contracts + expected output, never the full conversation.
 

@@ -34,7 +34,7 @@ For each workstream under `docs/execution/active/<workstream-id>/` (relocate to 
 - `DECISIONS.md` — architectural decisions
 - `RISKS_AND_BLOCKERS.md` — active risk register
 - `RUN_LOG.md` — chronological execution evidence
-- `REVIEW.md` — the per-round machine-routable review verdict (see `REVIEW_CONTRACT.md`)
+- `REVIEW.md` — the per-round machine-routable review verdict **and the findings ledger**: every `F#` ever raised, with a `disposition` saying whether it is open or settled, so a settled call is not re-litigated next round (see `REVIEW_CONTRACT.md`)
 - `SUBAGENTS/*.md` — delegated task contracts
 
 ## 5) Testing Discipline  *(commands FILL PER REPO)*
