@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drop the HARD run marker for this repo — the categorical, opt-in version of the loop gate.
+# Drop the HARD run marker for this repo — the opt-in marker the agent cannot remove.
 #
 #   Run:  sudo ./.claude/scripts/lock-loop.sh
 #
@@ -136,7 +136,8 @@ else
   chmod 644 "$MARKER"
   printf 'repo=%s\nlocked_at=%s\nlocked_by=%s\n' \
     "$REPO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SUDO_USER:-root}" > "$MARKER"
-  echo "Locked. The loop is now categorically gated for this repo."
+  echo "Locked. The run marker for this repo cannot be removed by the agent until you unlock."
+  echo "  The push/PR block is still text matching; branch protection on the remote is the backstop."
   echo "  repo:   $REPO"
   echo "  marker: $MARKER (root-owned; the agent's user cannot remove it)"
 fi

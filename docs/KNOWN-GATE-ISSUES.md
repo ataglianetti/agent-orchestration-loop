@@ -8,7 +8,6 @@ Open defects in the loop's human gate (the ship guard, the soft and hard run mar
 
 | ID  | Severity         | Where                                                                    | Problem | Recommended fix |
 | --- | ---------------- | ------------------------------------------------------------------------ | ------- | --------------- |
-| G1  | CRITICAL (live)  | `scripts/block-human-gated-actions.sh` — `SHIP_RE`; `scripts/lock-loop.sh` — "Locked" message | The push/PR block is text matching, and ordinary commands pass it: `gh api repos/<o>/<r>/pulls -f …` (an implicit POST), `git --no-pager push`, `git -c alias.p=push p`, and `curl` to the GitHub API with `$(gh auth token)`. Meanwhile the lock message tells the user the run is "categorically gated". | Broaden `SHIP_RE` to cover `gh api` POSTs to pulls and merges, git global flags and aliases before `push`, and `curl` to `api.github.com`. Reword the lock message so it does not overclaim. Document branch protection as the backstop that does not depend on matching text. |
 | G2  | NOTE             | `scripts/block-human-gated-actions.sh` — section 1 deny message          | Under a hard lock with no soft marker, the deny message still tells the user to `rm .loop-active`, which does nothing. | Name `sudo unlock-loop.sh` when the hard marker is what holds the gate. |
 
 ## Soft marker
