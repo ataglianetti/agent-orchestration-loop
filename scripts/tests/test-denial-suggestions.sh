@@ -78,6 +78,10 @@ echo "== the human override, issued through the agent, must block =="
 run_guard "$TMPROOT/marked" "rm '$TMPROOT/marked/.loop-active'"
 [ $? -eq 2 ] && ok || bad "hook allowed the 'rm .loop-active' override through the agent"
 
+echo "== the hard-lock override (sudo unlock-loop.sh), issued through the agent, must block =="
+run_guard "$TMPROOT/marked" "sudo ./.claude/scripts/unlock-loop.sh"
+[ $? -eq 2 ] && ok || bad "hook allowed the 'sudo unlock-loop.sh' override through the agent"
+
 # --- B. Drift guard: the hook's denials must never suggest a gate-clearing command.
 echo "== no denial message suggests a marker-clearing command =="
 # Pull the text of every deny() call argument (the reason strings shown to the agent).
