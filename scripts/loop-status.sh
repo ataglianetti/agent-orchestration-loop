@@ -64,10 +64,33 @@ if [ -n "$SCRIPT_REPO" ] && [ "$SCRIPT_REPO" != "$GUARD_REPO" ]; then
   echo "WARNING: these scripts live in $SCRIPT_REPO, but the lock is keyed on the repo you are in ($GUARD_REPO)." >&2
 fi
 
+# Soft markers in OTHER checkouts of this repo. A loop in a git worktree writes its marker at that
+# worktree's root, so from the main checkout a gated worktree was invisible. Report them, but do
+# not let them change the verdict or the exit code: /orchestrate reads the exit code to decide
+# whether to write ITS OWN marker, and a gated worktree elsewhere must not stop a run here from
+# gating itself.
+OTHER_SOFT="$(
+  while IFS= read -r WT; do
+    [ -n "$WT" ] && [ -f "$WT/.loop-active" ] || continue
+    [ -f "$SOFT" ] && [ "$WT/.loop-active" -ef "$SOFT" ] && continue
+    printf '%s\n' "$WT/.loop-active"
+  done <<EOF
+$(git -c safe.directory='*' -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' || true)
+EOF
+)"
+report_other_soft() {
+  [ -n "$OTHER_SOFT" ] || return 0
+  echo "  gated in other worktrees of this repo (soft; clear with: ungate inside that worktree, or ungate --all — in your terminal):"
+  while IFS= read -r M; do echo "    $M"; done <<EOF
+$OTHER_SOFT
+EOF
+}
+
 if [ "$soft_present" -eq 1 ] || [ "$hard_present" -eq 1 ]; then
   echo "ACTIVE"
   [ "$hard_present" -eq 1 ] && echo "  hard: $HARD (root-owned; clear with: sudo ./.claude/scripts/unlock-loop.sh)"
-  [ "$soft_present" -eq 1 ] && echo "  soft: $SOFT (clear with: rm '$SOFT')"
+  [ "$soft_present" -eq 1 ] && echo "  soft: $SOFT (clear with: ungate, in your terminal)"
+  report_other_soft
   if [ "$frozen" -eq 1 ]; then
     echo "  hook wiring frozen: $CLAUDE_DIR (whole subtree except worktrees/; unlock lifts it)"
     [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && echo "    via symlink: $CLAUDE_LINK"
@@ -89,7 +112,8 @@ EOF
 fi
 
 echo "INACTIVE"
-echo "  no run marker for this repo ($REPO)"
+echo "  no run marker for this checkout ($(dirname "$SOFT")), and no hard lock on the repo"
+report_other_soft
 # A frozen subtree with no marker is a stuck state — a lock whose unlock never ran.
 [ "$frozen" -eq 1 ] && echo "  WARNING: $CLAUDE_DIR is still frozen — run: sudo ./.claude/scripts/unlock-loop.sh"
 exit 1
