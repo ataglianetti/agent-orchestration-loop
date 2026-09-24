@@ -117,9 +117,11 @@ fi
 #     command and a `pulls` in the next do not combine. A write is an explicit POST/PUT/PATCH, or
 #     a field flag with no explicit GET — gh api sends a POST whenever fields are given.
 #     Endpoints: pulls (open, review, merge), merges (branch merge), git/refs (a push by API),
-#     contents (a commit by API), and GraphQL PR mutations.
-API_TARGET='(pulls|/merges?([^[:alnum:]_]|$)|git/refs|/contents/)'
-GQL_WRITE='(createPullRequest|mergePullRequest|markPullRequestReadyForReview|enablePullRequestAutoMerge|addPullRequestReview|submitPullRequestReview|createRef|updateRef|createCommitOnBranch|mergeBranch)'
+#     contents (a commit by API), branch protection and rulesets, and the GraphQL equivalents.
+#     Branch protection is the backstop for everything this guard misses, so switching it off is
+#     the first step of shipping around it: the loop runs on the human's token, which is an admin.
+API_TARGET='(pulls|/merges?([^[:alnum:]_]|$)|git/refs|/contents/|branches/[^[:space:]]*/protection|rulesets)'
+GQL_WRITE='(createPullRequest|mergePullRequest|markPullRequestReadyForReview|enablePullRequestAutoMerge|addPullRequestReview|submitPullRequestReview|createRef|updateRef|deleteRef|createCommitOnBranch|mergeBranch|(create|update|delete)BranchProtectionRule|(create|update|delete)RepositoryRuleset)'
 while IFS= read -r SEG; do
   printf '%s' "$SEG" | grep -Eq 'gh[[:space:]]+api([[:space:]]|$)' || continue
   if printf '%s' "$SEG" | grep -Eq "$GQL_WRITE"; then deny "$SHIP_MSG"; fi
@@ -127,7 +129,7 @@ while IFS= read -r SEG; do
   if printf '%s' "$SEG" | grep -Eq 'graphql' \
     && printf '%s' "$SEG" | grep -Eq '=@|--input'; then deny "$SHIP_MSG"; fi
   printf '%s' "$SEG" | grep -Eq "$API_TARGET" || continue
-  if printf '%s' "$SEG" | grep -Eiq '(-X|--method)[[:space:]=]*(POST|PUT|PATCH)'; then deny "$SHIP_MSG"; fi
+  if printf '%s' "$SEG" | grep -Eiq '(-X|--method)[[:space:]=]*(POST|PUT|PATCH|DELETE)'; then deny "$SHIP_MSG"; fi
   if printf '%s' "$SEG" | grep -Eq '[[:space:]](-[fF]|--field|--raw-field|--input)([[:space:]=]|$)' \
     && ! printf '%s' "$SEG" | grep -Eiq '(-X|--method)[[:space:]=]*GET'; then
     deny "$SHIP_MSG"
