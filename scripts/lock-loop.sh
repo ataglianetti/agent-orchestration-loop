@@ -174,7 +174,7 @@ else
   echo "  The push/PR block is still text matching; branch protection on the remote is the backstop."
   echo "  repo:   $REPO"
   echo "  marker: $MARKER (root-owned; the agent's user cannot remove it)"
-  echo "  covers: every worktree of this repo; only $REPO/.claude is frozen"
+  echo "  covers: every worktree of this repo, and each worktree's .claude is frozen below"
 fi
 
 # Freeze the hook wiring too. The marker is only as strong as the hook that reads it, and that hook
@@ -193,31 +193,61 @@ fi
 # anything in there while the run is locked; only unlock-loop.sh lifts the flags.
 # -d (not -L -a -d): CLAUDE_DIR is the RESOLVED path by now, so this can no longer pass on a
 # symlink whose contents were never walked.
-if [ -d "$CLAUDE_DIR" ]; then
-  # worktrees/ has to exist BEFORE the freeze: once .claude is immutable, nothing can create it,
-  # and the first parallel worktree of the run would fail. Owned like .claude, not by root.
-  if [ ! -e "$CLAUDE_DIR/worktrees" ]; then
-    OWNER="$(stat -f '%u:%g' "$CLAUDE_DIR" 2>/dev/null || stat -c '%u:%g' "$CLAUDE_DIR")"
-    mkdir "$CLAUDE_DIR/worktrees" && chown "$OWNER" "$CLAUDE_DIR/worktrees"
+# Freeze one .claude directory: resolve a symlink, freeze the real tree, then freeze the link.
+# Runs for the main checkout and again for every worktree (G12): one lock covers every worktree's
+# sessions, and a session in a worktree reads THAT worktree's .claude, not the main one.
+freeze_claude() {
+  local CLAUDE_LINK="$1" CLAUDE_DIR="$1" is_main="$2"
+  if [ -L "$CLAUDE_DIR" ]; then
+    CLAUDE_DIR="$(cd "$CLAUDE_DIR" 2>/dev/null && pwd -P)" || {
+      echo "  WARNING: $CLAUDE_LINK is a symlink that does not resolve — not frozen." >&2; return 0; }
   fi
-  if freeze_tree "$CLAUDE_DIR"; then
-    echo "  frozen: $CLAUDE_DIR (whole subtree except worktrees/ — the agent cannot unwire the guard while locked)"
-    echo "          this includes settings.json, settings.local.json, and the hook script itself"
-    echo "          worktrees/ stays writable so parallel worktrees keep working"
-    # Freeze the LINK too, or the agent repoints .claude at a directory it does control and the
-    # frozen target stops being the one Claude Code reads. -h flags the link, not its target.
-    if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ]; then
-      if command -v chflags >/dev/null 2>&1 && chflags -h schg "$CLAUDE_LINK" 2>/dev/null; then
-        echo "  frozen: $CLAUDE_LINK (the symlink itself — cannot be repointed while locked)"
-      else
-        echo "  WARNING: $CLAUDE_LINK is a symlink and could not be frozen (chattr cannot flag a" >&2
-        echo "           symlink on Linux). The target is frozen, but the link could be repointed." >&2
+  if [ -d "$CLAUDE_DIR" ]; then
+    # worktrees/ has to exist BEFORE the freeze: once .claude is immutable, nothing can create it,
+    # and the first parallel worktree of the run would fail. Owned like .claude, not by root.
+    if [ "$is_main" = main ] && [ ! -e "$CLAUDE_DIR/worktrees" ]; then
+      OWNER="$(stat -f '%u:%g' "$CLAUDE_DIR" 2>/dev/null || stat -c '%u:%g' "$CLAUDE_DIR")"
+      mkdir "$CLAUDE_DIR/worktrees" && chown "$OWNER" "$CLAUDE_DIR/worktrees"
+    fi
+    if freeze_tree "$CLAUDE_DIR"; then
+      echo "  frozen: $CLAUDE_DIR (whole subtree except worktrees/ — the agent cannot unwire the guard while locked)"
+      echo "          this includes settings.json, settings.local.json, and the hook script itself"
+      if [ "$is_main" = main ]; then
+        echo "          worktrees/ stays writable so parallel worktrees keep working"
+      fi
+      printf 'frozen=%s\n' "$CLAUDE_DIR" >> "$MARKER"   # unlock reads these back
+      # Freeze the LINK too, or the agent repoints .claude at a directory it does control and the
+      # frozen target stops being the one Claude Code reads. -h flags the link, not its target.
+      if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ]; then
+        if command -v chflags >/dev/null 2>&1 && chflags -h schg "$CLAUDE_LINK" 2>/dev/null; then
+          echo "  frozen: $CLAUDE_LINK (the symlink itself — cannot be repointed while locked)"
+        else
+          echo "  WARNING: $CLAUDE_LINK is a symlink and could not be frozen (chattr cannot flag a" >&2
+          echo "           symlink on Linux). The target is frozen, but the link could be repointed." >&2
+        fi
       fi
     fi
+  else
+    echo "  NOTE: $CLAUDE_DIR not found — hook wiring not frozen. Is the guard installed in this repo?" >&2
   fi
-else
-  echo "  NOTE: $CLAUDE_DIR not found — hook wiring not frozen. Is the guard installed in this repo?" >&2
-fi
+}
+
+freeze_claude "$CLAUDE_LINK" main
+
+# Every other worktree of the repo. A worktree with no .claude has no project hook at all, so its
+# sessions are gated only by user-level settings — say so rather than report a freeze that did
+# not happen. A worktree added AFTER this runs is not frozen; re-running this script (idempotent)
+# picks it up, and loop-status.sh warns about any it finds unfrozen.
+while IFS= read -r WT; do
+  [ -n "$WT" ] || continue
+  if [ -e "$WT/.claude" ] || [ -L "$WT/.claude" ]; then
+    freeze_claude "$WT/.claude" worktree
+  else
+    echo "  NOTE: worktree $WT has no .claude — sessions there have no project hook to freeze." >&2
+  fi
+done <<EOF
+$(git -c safe.directory='*' -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | tail -n +2 || true)
+EOF
 
 echo
 echo "Next:  run /orchestrate <id> as usual. Clear the gate when you act on the card:"
@@ -227,3 +257,6 @@ echo 'While locked, "Allow always" on a permission prompt will fail — Claude C
 echo "grant in .claude/settings.local.json, which is frozen. That is the lock working, not a"
 echo "fault: a standing allow rule written mid-run is exactly the thing the freeze exists to stop."
 echo "Choose \"Allow once\" for the run, or unlock first if you genuinely want a permanent grant."
+echo
+echo "While locked, 'git worktree remove' fails for any worktree whose .claude is frozen. A worktree"
+echo "added after this point is not frozen until you re-run this script."

@@ -72,6 +72,19 @@ if [ "$soft_present" -eq 1 ] || [ "$hard_present" -eq 1 ]; then
     echo "  hook wiring frozen: $CLAUDE_DIR (whole subtree except worktrees/; unlock lifts it)"
     [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && echo "    via symlink: $CLAUDE_LINK"
   fi
+  # G12: every worktree's own .claude must be frozen too, or a session there can unwire its hook.
+  # A worktree added after the lock is the usual cause; re-running the lock picks it up.
+  if [ "$hard_present" -eq 1 ]; then
+    while IFS= read -r WT; do
+      [ -n "$WT" ] || continue
+      WC="$WT/.claude"; [ -L "$WC" ] && WC="$(cd "$WC" 2>/dev/null && pwd -P || printf '%s' "$WC")"
+      if [ -d "$WC" ] && ! is_frozen "$WC"; then
+        echo "  WARNING: worktree $WT has an unfrozen .claude — re-run: sudo ./.claude/scripts/lock-loop.sh" >&2
+      fi
+    done <<EOF
+$(git -c safe.directory='*' -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | tail -n +2)
+EOF
+  fi
   exit 0
 fi
 

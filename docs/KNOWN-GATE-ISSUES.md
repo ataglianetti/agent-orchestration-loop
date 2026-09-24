@@ -23,7 +23,6 @@ Open defects in the loop's human gate (the ship guard, the soft and hard run mar
 | G6  | WARNING          | `scripts/lock-loop.sh` — `freeze_tree` error path            | Freeze errors go to `/dev/null`; the script still prints "Locked" and exits 0 after a partial freeze, leaving the hook editable. | Fail loud: undo whatever was frozen and exit non-zero. |
 | G7  | WARNING          | `scripts/lock-loop.sh` — `freeze_tree`                       | `chflags schg` runs without `-h`, so a symlink inside `.claude` freezes its target; `unlock-loop.sh` never unfreezes that target. | Use `-h` so links, not their targets, are frozen. |
 | G8  | WARNING          | `commands/orchestrate.md` — hard-mode bullet under "Two gate modes" | The text says the hard-locked guard "cannot be unwired from any direction". User-level `~/.claude/settings.json` stays writable and can disable hooks for newly started sessions (not verified live). | Reword to state that user-level configuration is not covered by the freeze. |
-| G12 | WARNING          | `scripts/lock-loop.sh` — `CLAUDE_DIR`                        | One hard lock covers every worktree of the repo, but only the main checkout's `.claude/` is frozen. A session running inside a worktree reads that worktree's own `.claude/`, which stays writable, so an agent there can unwire its hook. | Also freeze each worktree's hook surface at lock time, or document worktree sessions as soft-gated only. |
 
 ## Review contract
 

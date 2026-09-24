@@ -115,7 +115,7 @@ The gate is a marker file the guard checks. There are two, and the difference is
   sudo ./.claude/scripts/unlock-loop.sh   # after you act on the card — clears it
   ```
 
-  The lock is keyed on the repo you run it from, not on where the scripts live, and one lock covers every git worktree of that repo: a session in any of them is gated. Only the main checkout's `.claude/` is frozen, though. A session inside a worktree reads that worktree's own `.claude/`, which the lock leaves writable (G12 in `docs/KNOWN-GATE-ISSUES.md`).
+  The lock is keyed on the repo you run it from, not on where the scripts live, and one lock covers every git worktree of that repo: a session in any of them is gated. A session inside a worktree reads that worktree's own `.claude/`, so the lock freezes each worktree's `.claude/` as well as the main one, and unlock lifts them all. Two consequences: `git worktree remove` fails while locked, and a worktree added after the lock is not frozen until you re-run `sudo lock-loop.sh` (safe to repeat). `loop-status.sh` warns about any worktree it finds unfrozen. A worktree with no `.claude/` has no project hook at all, and the lock says so.
 
   `./.claude/scripts/loop-status.sh` reports which marker (if any) holds the gate. **Lock when a rogue ship would reach something real and you won't be watching** — solo repos with no downstream review, unattended or overnight runs, direct-to-main. **Skip it** for supervised runs, throwaway branches, or repos whose own branch protection already gates merges; there the `sudo` is friction for nothing and the soft default is enough.
 
