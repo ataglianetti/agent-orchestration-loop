@@ -8,10 +8,31 @@
 # Exit 0 = ACTIVE (a soft or hard marker is present), exit 1 = INACTIVE.
 
 GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
-REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P))"
-KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
-HARD="$GUARD_DIR/$KEY"
-SOFT="$REPO/.loop-active"
+# >>> guard key: keep this block byte-identical in block-human-gated-actions.sh, lock-loop.sh,
+# unlock-loop.sh and loop-status.sh. The test suite compares the four copies.
+# The hard marker is keyed on the repo's SHARED git directory (--git-common-dir), resolved from the
+# project dir, else the current directory. Every worktree of a repo shares that directory, so one
+# lock covers them all, and the key does not depend on where these scripts happen to live — a
+# symlinked .claude pointing into another repo no longer changes it. safe.directory='*' because
+# lock and unlock run git as root inside a repo the human owns; command-line config is honoured.
+KEY_BASE="${CLAUDE_PROJECT_DIR:-$PWD}"
+GUARD_REPO="$(cd "$KEY_BASE" 2>/dev/null && d="$(git -c safe.directory='*' rev-parse --git-common-dir 2>/dev/null)" && cd "$d" 2>/dev/null && pwd -P || true)"
+GUARD_MAIN="$(git -c safe.directory='*' -C "$KEY_BASE" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p' || true)"
+GUARD_KEY="$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
+# Before this key existed, the marker was keyed on a checkout's root. Honour and clear that key
+# too, so a lock taken before the upgrade is neither ignored nor left behind.
+GUARD_LEGACY_KEY="$(printf '%s' "$(git -c safe.directory='*' -C "$KEY_BASE" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")" | cksum | cut -d' ' -f1)"
+# <<< guard key
+if [ -z "$GUARD_REPO" ]; then
+  echo "INACTIVE"
+  echo "  $KEY_BASE is not inside a git repository — no hard lock can apply"
+  exit 1
+fi
+REPO="$(cd "${GUARD_MAIN:-$KEY_BASE}" && pwd -P)"
+HARD="$GUARD_DIR/$GUARD_KEY"
+LEGACY="$GUARD_DIR/$GUARD_LEGACY_KEY"
+# The soft marker is per checkout: the loop writes it at the root of the project it runs in.
+SOFT="${CLAUDE_PROJECT_DIR:-$(git -C "$KEY_BASE" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")}/.loop-active"
 CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
 # Resolve a symlinked .claude the same way lock/unlock do. Checking the link instead of its
@@ -29,10 +50,19 @@ is_frozen() {  # 0 = immutable flag is set on the path
 soft_present=0; hard_present=0; frozen=0
 [ -f "$SOFT" ] && soft_present=1
 [ -f "$HARD" ] && hard_present=1
+[ "$LEGACY" != "$HARD" ] && [ -f "$LEGACY" ] && { hard_present=1; HARD="$LEGACY"; }
 # The .claude DIRECTORY's own flag is the signal: freeze_tree sets it last, so if it carries the
 # flag the whole subtree was frozen. Checking one settings file would miss a partial freeze and,
 # worse, would report "not frozen" for a tree that is.
 [ -d "$CLAUDE_DIR" ] && is_frozen "$CLAUDE_DIR" && frozen=1
+
+# These scripts may belong to a different repo than the one being checked (a .claude symlinked
+# into a dotfiles repo, or a copy run by path). The lock follows the repo you are IN, not the
+# script's home — say so when the two differ, because that was the old behaviour.
+SCRIPT_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && d="$(git -c safe.directory='*' rev-parse --git-common-dir 2>/dev/null)" && cd "$d" 2>/dev/null && pwd -P)"
+if [ -n "$SCRIPT_REPO" ] && [ "$SCRIPT_REPO" != "$GUARD_REPO" ]; then
+  echo "WARNING: these scripts live in $SCRIPT_REPO, but the lock is keyed on the repo you are in ($GUARD_REPO)." >&2
+fi
 
 if [ "$soft_present" -eq 1 ] || [ "$hard_present" -eq 1 ]; then
   echo "ACTIVE"
