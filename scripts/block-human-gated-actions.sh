@@ -59,15 +59,92 @@ deny() {
 OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent): rm '$ROOT/.loop-active'"
 
 # 1. Human-gated, outward-facing actions the loop must never take on its own.
-#    Covers the gh porcelain, the raw API path to the same endpoints, and push.
+#    This is text matching, so it is a strong filter, not a wall: a command whose words are built
+#    at runtime (a variable holding "push", a base64 blob piped to sh) will pass it. The backstop
+#    that does not depend on matching text is branch protection on the remote — see README.
+SHIP_MSG="Blocked by the orchestrate loop guard: a workstream loop is active (.loop-active present). Opening/merging PRs and pushing are human-gated — the loop must never perform them on its own (it self-approved a PR once; this guard is why it cannot again). Write the approval card and stop instead. $OVERRIDE"
+
+# git global options that can sit between `git` and the subcommand. The ones that take a
+# separate argument are listed; every other option is a single `-x` / `--x` / `--x=y` token.
+GIT_OPTS='([[:space:]]+(-[Cc][[:space:]]+[^[:space:]]+|--(git-dir|work-tree|namespace|super-prefix|config-env|exec-path)[[:space:]]+[^[:space:]]+|-[^[:space:]]+))*'
+PUSH_VERBS='(push|send-pack|http-push|subtree[[:space:]]+push)'
+
+# 1a. gh porcelain. `gh repo sync` writes to a remote branch, so it is a push by another name.
 SHIP_RE='(gh[[:space:]]+pr[[:space:]]+(create|merge|ready))'
-SHIP_RE="$SHIP_RE"'|(gh[[:space:]]+pr[[:space:]]+review[^|]*--approve)'
-SHIP_RE="$SHIP_RE"'|(git[[:space:]]+((-C|-c)[[:space:]]+[^[:space:]]+[[:space:]]+)*push([^[:alnum:]_]|$))'
-SHIP_RE="$SHIP_RE"'|(gh[[:space:]]+api[^|]*(pulls|/merge)[^|]*(-X|--method)[[:space:]]*(POST|PUT|PATCH))'
-SHIP_RE="$SHIP_RE"'|(gh[[:space:]]+api[^|]*(-X|--method)[[:space:]]*(POST|PUT|PATCH)[^|]*(pulls|/merge))'
+SHIP_RE="$SHIP_RE"'|(gh[[:space:]]+pr[[:space:]]+review[^|]*(--approve|[[:space:]]-a([[:space:]]|$)))'
+SHIP_RE="$SHIP_RE"'|(gh[[:space:]]+repo[[:space:]]+sync)'
+# 1b. git push, with any global options in front of it (`git --no-pager push`, `git -c x=y push`).
+SHIP_RE="$SHIP_RE"'|(git'"$GIT_OPTS"'[[:space:]]+'"$PUSH_VERBS"'([^[:alnum:]_]|$))'
 
 if printf '%s' "$CMD" | grep -Eq "$SHIP_RE"; then
-  deny "Blocked by the orchestrate loop guard: a workstream loop is active (.loop-active present). Opening/merging PRs and pushing are human-gated — the loop must never perform them on its own (it self-approved a PR once; this guard is why it cannot again). Write the approval card and stop instead. $OVERRIDE"
+  deny "$SHIP_MSG"
+fi
+
+# 1c. git aliases. `git -c alias.p=push p`, `git config alias.p push`, and GIT_CONFIG_KEY_n=alias.p
+#     all put the words "alias." and "push" in the same command. A command that mentions both is
+#     blocked, which also stops the agent defining a push alias for a later command to use.
+if printf '%s' "$CMD" | grep -Eq 'alias\.' \
+  && printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])'"$PUSH_VERBS"'([^[:alnum:]_-]|$)'; then
+  deny "$SHIP_MSG"
+fi
+#     An alias that already exists in git config (defined before the run, or with its value built
+#     at runtime) never shows "push" in the command. Resolve the configured aliases and block any
+#     whose value pushes.
+PUSH_ALIASES=$(git -C "$ROOT" config --get-regexp '^alias\.' 2>/dev/null \
+  | awk '{ n = $1; sub(/^alias\./, "", n); $1 = ""; print n "\t" $0 }' \
+  | grep -E $'\t''.*(^|[^[:alnum:]_-])'"$PUSH_VERBS"'([^[:alnum:]_-]|$)' \
+  | cut -f1 | grep -E '^[A-Za-z0-9_-]+$' | paste -sd'|' -)
+if [ -n "$PUSH_ALIASES" ] \
+  && printf '%s' "$CMD" | grep -Eq 'git'"$GIT_OPTS"'[[:space:]]+('"$PUSH_ALIASES"')([^[:alnum:]_-]|$)'; then
+  deny "$SHIP_MSG"
+fi
+
+#     gh has aliases too (`gh alias set pc 'pr create'`, then `gh pc`). Defining one mid-run is
+#     blocked outright; existing ones are resolved and blocked when they expand to a ship command,
+#     to `api` (whose arguments follow the alias, out of sight of 1d), or to a shell expression.
+if printf '%s' "$CMD" | grep -Eq 'gh[[:space:]]+alias[[:space:]]+(set|import)'; then
+  deny "Blocked by the orchestrate loop guard: defining a gh alias while a loop is active can hide a PR or push command from this guard. $OVERRIDE"
+fi
+GH_SHIP_ALIASES=$(gh alias list 2>/dev/null \
+  | grep -E '^[A-Za-z0-9_-]+:[[:space:]]*(!|api([[:space:]]|$)|pr[[:space:]]+(create|merge|ready|review)|repo[[:space:]]+sync|.*(^|[^[:alnum:]_-])'"$PUSH_VERBS"'([^[:alnum:]_-]|$))' \
+  | cut -d: -f1 | paste -sd'|' -)
+if [ -n "$GH_SHIP_ALIASES" ] \
+  && printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])gh[[:space:]]+('"$GH_SHIP_ALIASES"')([^[:alnum:]_-]|$)'; then
+  deny "$SHIP_MSG"
+fi
+
+# 1d. The raw API path to the same endpoints. Checked per command segment, so a `-f` in one
+#     command and a `pulls` in the next do not combine. A write is an explicit POST/PUT/PATCH, or
+#     a field flag with no explicit GET — gh api sends a POST whenever fields are given.
+#     Endpoints: pulls (open, review, merge), merges (branch merge), git/refs (a push by API),
+#     contents (a commit by API), and GraphQL PR mutations.
+API_TARGET='(pulls|/merges?([^[:alnum:]_]|$)|git/refs|/contents/)'
+GQL_WRITE='(createPullRequest|mergePullRequest|markPullRequestReadyForReview|enablePullRequestAutoMerge|addPullRequestReview|submitPullRequestReview|createRef|updateRef|createCommitOnBranch|mergeBranch)'
+while IFS= read -r SEG; do
+  printf '%s' "$SEG" | grep -Eq 'gh[[:space:]]+api([[:space:]]|$)' || continue
+  if printf '%s' "$SEG" | grep -Eq "$GQL_WRITE"; then deny "$SHIP_MSG"; fi
+  # A GraphQL query read from a file (`-F query=@m.graphql`, `--input`) hides the mutation name.
+  if printf '%s' "$SEG" | grep -Eq 'graphql' \
+    && printf '%s' "$SEG" | grep -Eq '=@|--input'; then deny "$SHIP_MSG"; fi
+  printf '%s' "$SEG" | grep -Eq "$API_TARGET" || continue
+  if printf '%s' "$SEG" | grep -Eiq '(-X|--method)[[:space:]=]*(POST|PUT|PATCH)'; then deny "$SHIP_MSG"; fi
+  if printf '%s' "$SEG" | grep -Eq '[[:space:]](-[fF]|--field|--raw-field|--input)([[:space:]=]|$)' \
+    && ! printf '%s' "$SEG" | grep -Eiq '(-X|--method)[[:space:]=]*GET'; then
+    deny "$SHIP_MSG"
+  fi
+done <<EOF
+$(printf '%s' "$CMD" | tr ';|&' '\n\n\n')
+EOF
+
+# 1e. Authenticated raw HTTP to the GitHub API (curl, wget, a Python or Node one-liner) and
+#     extracting the token that would make it work. An unauthenticated call cannot write, so the
+#     token is the part worth walling. Reads go through `gh api`, which 1d already filters.
+if printf '%s' "$CMD" | grep -Eiq '(api|uploads)\.github\.com' \
+  && printf '%s' "$CMD" | grep -Eiq 'authorization|token|bearer|[[:space:]](-u|--user|-n|--netrc)([[:space:]=]|$)'; then
+  deny "Blocked by the orchestrate loop guard: authenticated raw HTTP to the GitHub API can open, approve or merge a PR and push, which are human-gated while a loop is active. Use 'gh api' for reads. $OVERRIDE"
+fi
+if printf '%s' "$CMD" | grep -Eq 'gh[[:space:]]+auth[[:space:]]+(token|status[^|]*--show-token)|git'"$GIT_OPTS"'[[:space:]]+credential([[:space:]]+fill|-[[:alnum:]]+[[:space:]]+get)|security[[:space:]]+find-(internet|generic)-password[^|]*github'; then
+  deny "Blocked by the orchestrate loop guard: reading the GitHub token while a loop is active is the first step of shipping around the guard. The loop does not need the raw token; gh and git use it on their own. $OVERRIDE"
 fi
 
 # 2. The marker is human-only. Removing or renaming it is the escape hatch, so it is walled

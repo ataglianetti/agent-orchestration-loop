@@ -65,7 +65,9 @@ Same rule as the approval gate, one level up: **the loop instruments the judgmen
 
 ## The human gate — why it's mechanical, not just instructions
 
-The loop runs autonomously but **never acts as the human**: it can't record an approval, rule a `FLAG-HUMAN` finding, open a PR, or merge. The first time this loop ran for real, it reached a clean review and then *self-approved and opened a PR* — exactly the thing it was told never to do. Prose alone has a ceiling; an agent optimizing to finish will rationalize past it. So the gate is enforced mechanically: while a run is active, the PreToolUse guard makes `gh pr create|merge` and `git push` impossible. `CLEAN` means *ready for a human*, not *approved*.
+The loop runs autonomously but **never acts as the human**: it can't record an approval, rule a `FLAG-HUMAN` finding, open a PR, or merge. The first time this loop ran for real, it reached a clean review and then *self-approved and opened a PR* — exactly the thing it was told never to do. Prose alone has a ceiling; an agent optimizing to finish will rationalize past it. So the gate is enforced mechanically: while a run is active, a PreToolUse guard blocks `gh pr create|merge|ready`, approving reviews, `git push`, and the routes around them — git global flags, git and gh aliases, `gh api` writes to PR, merge, ref and contents endpoints, GraphQL PR mutations, authenticated raw HTTP to the GitHub API, and reading the GitHub token. `CLEAN` means *ready for a human*, not *approved*.
+
+**The guard matches text, so it is a filter, not a wall.** A command that builds its words at runtime (a variable holding `push`, an encoded script piped to a shell) will pass it. The backstop that does not depend on matching text is on the remote: branch protection or a ruleset on your default branch that requires a pull request and an approving review from someone other than the author. With that in place, the worst a guard miss can do is push a branch; it cannot land on `main`. Set it on any repo where an unattended run could reach something real.
 
 ### The marker the gate reads — soft by default, hard when it matters
 
