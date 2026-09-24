@@ -100,12 +100,40 @@ if [ -n "${CLAUDE_DIR:-}" ]; then
   esac
 fi
 
+# Freeze errors are collected here, not thrown away (G6). A lock that failed to freeze part of the
+# hook wiring and still printed "Locked" was worse than no lock: it told the human the guard could
+# not be unwired while leaving a file that unwires it editable.
+FREEZE_ERR="$(mktemp)"
+trap 'rm -f "$FREEZE_ERR"' EXIT
+
 # Make a path immutable even against its owner: schg (macOS) / +i (Linux). Both need root to set
 # AND to clear, so a non-root agent can neither modify the path nor lift the flag.
+# -h: flag a symlink itself, never its target (G7). Following a link inside .claude froze whatever
+# it pointed at — possibly outside the repo — and unlock never lifted it.
 freeze() {
-  if   command -v chflags >/dev/null 2>&1; then chflags schg "$1"
-  elif command -v chattr  >/dev/null 2>&1; then chattr +i "$1"
-  else echo "  WARNING: no chflags or chattr found — cannot freeze $1" >&2; return 1; fi
+  if   command -v chflags >/dev/null 2>&1; then chflags -h schg "$1" 2>>"$FREEZE_ERR"
+  elif command -v chattr  >/dev/null 2>&1; then chattr +i "$1" 2>>"$FREEZE_ERR"
+  else echo "no chflags or chattr found — cannot freeze $1" >>"$FREEZE_ERR"; return 1; fi
+}
+
+is_frozen() {  # 0 = immutable flag is set
+  if   command -v chflags >/dev/null 2>&1; then ls -ldO "$1" 2>/dev/null | grep -qw schg
+  elif command -v lsattr  >/dev/null 2>&1; then lsattr -d "$1" 2>/dev/null | awk '{print $1}' | grep -q i
+  else return 1; fi
+}
+
+# The rollback half of fail-loud. Same walk as unlock-loop.sh's unfreeze_tree: directory first so
+# the parent is writable before its children are touched; links cleared with -h.
+unfreeze_tree() {
+  local d="$1"
+  [ -e "$d" ] || [ -L "$d" ] || return 0
+  if   command -v chflags >/dev/null 2>&1; then
+    chflags -R noschg "$d" 2>/dev/null || true
+    find "$d" -type l -exec chflags -h noschg {} + 2>/dev/null || true
+  elif command -v chattr  >/dev/null 2>&1; then
+    find "$d" -type d -exec chattr -i {} + 2>/dev/null || true
+    find "$d" -type f -exec chattr -i {} + 2>/dev/null || true
+  fi
 }
 
 # Freeze a directory AND everything in it. Both halves are required, and each blocks something the
@@ -138,12 +166,12 @@ freeze() {
 freeze_subtree() {
   local d="$1"
   if   command -v chflags >/dev/null 2>&1; then
-    find "$d" -depth -exec chflags schg {} + 2>/dev/null
+    find "$d" -depth -exec chflags -h schg {} + 2>>"$FREEZE_ERR"
   elif command -v chattr >/dev/null 2>&1; then
-    find "$d" -type f -exec chattr +i {} + 2>/dev/null
-    find "$d" -depth -type d -exec chattr +i {} + 2>/dev/null
+    find "$d" -type f -exec chattr +i {} + 2>>"$FREEZE_ERR" \
+      && find "$d" -depth -type d -exec chattr +i {} + 2>>"$FREEZE_ERR"
   else
-    echo "  WARNING: no chflags or chattr found — cannot freeze $d" >&2; return 1
+    echo "no chflags or chattr found — cannot freeze $d" >>"$FREEZE_ERR"; return 1
   fi
 }
 
@@ -161,21 +189,37 @@ freeze_tree() {
 # un-removable by the agent's user — the permission that matters for unlink is on the directory.
 install -d -m 755 -o root -g wheel "$GUARD_DIR"
 
+CREATED_MARKER=0
 if [ -f "$MARKER" ]; then
-  echo "Already locked: a hard run marker is in force for this repo."
-  echo "  repo:   $REPO"
-  echo "  marker: $MARKER"
+  echo "Already locked: a hard run marker is in force for this repo. Re-freezing the hook wiring."
 else
   : > "$MARKER"
   chmod 644 "$MARKER"
   printf 'repo=%s\nlocked_at=%s\nlocked_by=%s\n' \
     "$REPO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${SUDO_USER:-root}" > "$MARKER"
-  echo "Locked. The run marker for this repo cannot be removed by the agent until you unlock."
-  echo "  The push/PR block is still text matching; branch protection on the remote is the backstop."
-  echo "  repo:   $REPO"
-  echo "  marker: $MARKER (root-owned; the agent's user cannot remove it)"
-  echo "  covers: every worktree of this repo, and each worktree's .claude is frozen below"
+  CREATED_MARKER=1
 fi
+
+# Every .claude this run froze that was NOT frozen before it, so a failure undoes exactly this
+# run's work. A lock already in force when this ran is left as it was.
+NEWLY_FROZEN=()
+lock_failed() {
+  echo >&2
+  echo "LOCK FAILED: could not freeze $1" >&2
+  sed 's/^/  /' "$FREEZE_ERR" | head -20 >&2
+  local d
+  for d in ${NEWLY_FROZEN[@]+"${NEWLY_FROZEN[@]}"}; do
+    unfreeze_tree "$d"
+    echo "  rolled back: $d" >&2
+  done
+  if [ "$CREATED_MARKER" -eq 1 ]; then
+    rm -f "$MARKER"
+    echo "  No lock is in force. Fix the error above and run this again." >&2
+  else
+    echo "  The lock that was already in force is unchanged; only this run's freezes were undone." >&2
+  fi
+  exit 1
+}
 
 # Freeze the hook wiring too. The marker is only as strong as the hook that reads it, and that hook
 # lives entirely inside .claude/ — a directory the agent owns as much as the marker. Unwiring the
@@ -209,22 +253,23 @@ freeze_claude() {
       OWNER="$(stat -f '%u:%g' "$CLAUDE_DIR" 2>/dev/null || stat -c '%u:%g' "$CLAUDE_DIR")"
       mkdir "$CLAUDE_DIR/worktrees" && chown "$OWNER" "$CLAUDE_DIR/worktrees"
     fi
-    if freeze_tree "$CLAUDE_DIR"; then
-      echo "  frozen: $CLAUDE_DIR (whole subtree except worktrees/ — the agent cannot unwire the guard while locked)"
-      echo "          this includes settings.json, settings.local.json, and the hook script itself"
-      if [ "$is_main" = main ]; then
-        echo "          worktrees/ stays writable so parallel worktrees keep working"
-      fi
-      printf 'frozen=%s\n' "$CLAUDE_DIR" >> "$MARKER"   # unlock reads these back
-      # Freeze the LINK too, or the agent repoints .claude at a directory it does control and the
-      # frozen target stops being the one Claude Code reads. -h flags the link, not its target.
-      if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ]; then
-        if command -v chflags >/dev/null 2>&1 && chflags -h schg "$CLAUDE_LINK" 2>/dev/null; then
-          echo "  frozen: $CLAUDE_LINK (the symlink itself — cannot be repointed while locked)"
-        else
-          echo "  WARNING: $CLAUDE_LINK is a symlink and could not be frozen (chattr cannot flag a" >&2
-          echo "           symlink on Linux). The target is frozen, but the link could be repointed." >&2
-        fi
+    is_frozen "$CLAUDE_DIR" || NEWLY_FROZEN+=("$CLAUDE_DIR")
+    freeze_tree "$CLAUDE_DIR" || lock_failed "$CLAUDE_DIR"
+    echo "  frozen: $CLAUDE_DIR (whole subtree except worktrees/ — the agent cannot unwire the guard while locked)"
+    echo "          this includes settings.json, settings.local.json, and the hook script itself"
+    if [ "$is_main" = main ]; then
+      echo "          worktrees/ stays writable so parallel worktrees keep working"
+    fi
+    printf 'frozen=%s\n' "$CLAUDE_DIR" >> "$MARKER"   # unlock reads these back
+    # Freeze the LINK too, or the agent repoints .claude at a directory it does control and the
+    # frozen target stops being the one Claude Code reads. -h flags the link, not its target.
+    if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ]; then
+      if command -v chflags >/dev/null 2>&1 && chflags -h schg "$CLAUDE_LINK" 2>/dev/null; then
+        echo "  frozen: $CLAUDE_LINK (the symlink itself — cannot be repointed while locked)"
+        NEWLY_FROZEN+=("$CLAUDE_LINK")
+      else
+        echo "  WARNING: $CLAUDE_LINK is a symlink and could not be frozen (chattr cannot flag a" >&2
+        echo "           symlink on Linux). The target is frozen, but the link could be repointed." >&2
       fi
     fi
   else
@@ -248,6 +293,13 @@ while IFS= read -r WT; do
 done <<EOF
 $(git -c safe.directory='*' -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | tail -n +2 || true)
 EOF
+
+echo
+echo "Locked. The run marker for this repo cannot be removed by the agent until you unlock."
+echo "  The push/PR block is still text matching; branch protection on the remote is the backstop."
+echo "  repo:   $REPO"
+echo "  marker: $MARKER (root-owned; the agent's user cannot remove it)"
+echo "  covers: every worktree of this repo; each worktree's .claude is frozen above"
 
 echo
 echo "Next:  run /orchestrate <id> as usual. Clear the gate when you act on the card:"

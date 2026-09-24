@@ -58,7 +58,10 @@ is_frozen() {  # 0 = immutable flag is set
 unfreeze_tree() {
   local d="$1"
   [ -d "$d" ] || return 0
-  if   command -v chflags >/dev/null 2>&1; then chflags -R noschg "$d" 2>/dev/null || true
+  if   command -v chflags >/dev/null 2>&1; then
+    chflags -R noschg "$d" 2>/dev/null || true
+    # -R does not follow or flag symlinks, so a link frozen with -h needs its own pass.
+    find "$d" -type l -exec chflags -h noschg {} + 2>/dev/null || true
   elif command -v chattr  >/dev/null 2>&1; then
     find "$d" -type d -exec chattr -i {} + 2>/dev/null || true
     find "$d" -type f -exec chattr -i {} + 2>/dev/null || true

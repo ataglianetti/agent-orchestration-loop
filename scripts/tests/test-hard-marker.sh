@@ -170,6 +170,52 @@ printf '%s' "$OUT" | grep -q "worktree .*w2 has an unfrozen .claude" \
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status did not warn about an unfrozen worktree .claude"; }
 rm -rf "$H"
 
+echo "== G6: a failed freeze rolls back and exits non-zero instead of printing Locked =="
+# Real lock script, root-only calls stubbed. This chflags refuses any schg on w2's .claude, the
+# way a read-only mount or a missing privilege would, and logs everything else.
+H="$TG/g6"; mkdir -p "$H/bin" "$H/guard"
+printf '#!/bin/bash\n[ "$1" = "-u" ] && echo 0 || /usr/bin/id "$@"\n' > "$H/bin/id"
+printf '#!/bin/bash\nexit 0\n' > "$H/bin/install"
+printf '#!/bin/bash\nexit 0\n' > "$H/bin/chown"
+cat > "$H/bin/chflags" <<STUB
+#!/bin/bash
+echo "chflags \$*" >> "$H/log"
+case "\$*" in *schg*w2/.claude*) [[ "\$*" == *noschg* ]] || { echo "chflags: \${@: -1}: Operation not permitted" >&2; exit 1; } ;; esac
+exit 0
+STUB
+chmod +x "$H/bin/"*
+git -C "$H" init -q repo
+mkdir -p "$H/repo/.claude/scripts"; : > "$H/repo/.claude/settings.json"
+git -C "$H/repo" add -A && git -C "$H/repo" -c user.email=t@t -c user.name=t commit -qm init
+git -C "$H/repo" worktree add -q "$H/w2" -b w2 2>/dev/null
+( cd "$H/repo" && PATH="$H/bin:$PATH" LOOP_GUARD_DIR="$H/guard" bash "$LOCK" >"$H/out" 2>&1 ); RC=$?
+[ $RC -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock exited 0 after a failed freeze"; }
+grep -q '^Locked\.' "$H/out" \
+  && { FAIL=$((FAIL+1)); echo "  FAIL: lock printed Locked after a failed freeze"; } || PASS=$((PASS+1))
+grep -q 'LOCK FAILED: could not freeze .*w2/.claude' "$H/out" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock did not name the path it failed to freeze"; }
+grep -q 'Operation not permitted' "$H/out" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock swallowed the freeze error"; }
+grep -q "noschg .*/repo/.claude\$" "$H/log" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock did not roll back the main .claude it had already frozen"; }
+[ -z "$(ls "$H/guard")" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a failed lock left its marker behind"; }
+
+echo "== G6: a failed re-lock leaves the lock already in force alone =="
+KEYG6="$(key_for "$H/repo")"; printf 'repo=x\n' > "$H/guard/$KEYG6"; : > "$H/log"
+( cd "$H/repo" && PATH="$H/bin:$PATH" LOOP_GUARD_DIR="$H/guard" bash "$LOCK" >"$H/out" 2>&1 ); RC=$?
+[ $RC -ne 0 ] && [ -f "$H/guard/$KEYG6" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a failed re-lock removed the marker that was already in force"; }
+grep -q 'already in force is unchanged' "$H/out" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a failed re-lock did not say the earlier lock still holds"; }
+
+echo "== G7: symlinks are flagged themselves, never followed =="
+grep -q 'find "\$d" -depth -exec chflags -h schg' "$LOCK" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: freeze_subtree must use chflags -h"; }
+grep -q 'type l -exec chflags -h noschg' "$UNLOCK" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock must clear flags on symlinks with -h"; }
+rm -rf "$H"
+
 echo "== lock/unlock refuse to run without root (so a non-root agent cannot self-lock/unlock) =="
 LOOP_GUARD_DIR="$TG" bash "$LOCK"   >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop ran without root"; }
 LOOP_GUARD_DIR="$TG" bash "$UNLOCK" >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop ran without root"; }
@@ -261,9 +307,10 @@ echo "== the freeze skips .claude/worktrees/ and still covers everything else ==
 FW="$TG/fw"; mkdir -p "$FW/bin" "$FW/.claude/scripts" "$FW/.claude/worktrees/wt1/src" "$FW/.claude/.hidden"
 : > "$FW/.claude/settings.json"; : > "$FW/.claude/scripts/hook.sh"; : > "$FW/.claude/worktrees/wt1/src/a.ts"
 for tool in chflags chattr; do
-  printf '#!/bin/bash\nshift; printf "%%s\\n" "$@" >> "%s/log"\n' "$FW" > "$FW/bin/$tool"; chmod +x "$FW/bin/$tool"
+  # Log only the path arguments: flags (-h) and the flag name (schg, +i) are dropped.
+  printf '#!/bin/bash\nfor a; do case "$a" in -*|schg|+i) ;; *) printf "%%s\\n" "$a" >> "%s/log";; esac; done\n' "$FW" > "$FW/bin/$tool"; chmod +x "$FW/bin/$tool"
 done
-PATH="$FW/bin:$PATH" bash -c "$(sed -n '/^freeze()/,/^}/p;/^freeze_subtree()/,/^}/p;/^freeze_tree()/,/^}/p' "$LOCK"); freeze_tree \"$FW/.claude\""
+FREEZE_ERR="$FW/err" PATH="$FW/bin:$PATH" bash -c "$(sed -n '/^freeze()/,/^}/p;/^freeze_subtree()/,/^}/p;/^freeze_tree()/,/^}/p' "$LOCK"); freeze_tree \"$FW/.claude\""
 grep -q 'worktrees' "$FW/log" \
   && { FAIL=$((FAIL+1)); echo "  FAIL: the freeze touched .claude/worktrees/"; } || PASS=$((PASS+1))
 for f in settings.json scripts/hook.sh scripts .hidden; do
