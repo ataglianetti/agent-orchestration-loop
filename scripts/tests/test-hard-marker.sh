@@ -128,6 +128,48 @@ grep -q 'GUARD_LEGACY_KEY' "$UNLOCK" \
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop does not clear a lock taken under the old key"; }
 rm -f "$TG/$LEGACY_KEY"; rm -rf "$WT"
 
+echo "== G12: lock freezes every worktree's .claude, unlock lifts them all =="
+# Runs the REAL lock and unlock scripts. Root-only calls are stubbed: `id -u` reports 0, `install`
+# and `chown` succeed, and `chflags` logs its arguments instead of setting flags.
+H="$TG/g12"; mkdir -p "$H/bin" "$H/guard"
+printf '#!/bin/bash\n[ "$1" = "-u" ] && echo 0 || /usr/bin/id "$@"\n' > "$H/bin/id"
+printf '#!/bin/bash\nexit 0\n' > "$H/bin/install"
+for t in chflags chown chattr; do printf '#!/bin/bash\necho "%s $*" >> "%s/log"\n' "$t" "$H" > "$H/bin/$t"; done
+chmod +x "$H/bin/"*
+git -C "$H" init -q repo
+mkdir -p "$H/repo/.claude/scripts"; : > "$H/repo/.claude/settings.json"
+git -C "$H/repo" add -A && git -C "$H/repo" -c user.email=t@t -c user.name=t commit -qm init
+git -C "$H/repo" worktree add -q "$H/repo/.claude/worktrees/w1" -b w1 2>/dev/null
+git -C "$H/repo" worktree add -q "$H/w2" -b w2 2>/dev/null
+git -C "$H/repo" worktree add -q "$H/w3" -b w3 2>/dev/null; rm -rf "$H/w3/.claude"
+( cd "$H/repo" && PATH="$H/bin:$PATH" LOOP_GUARD_DIR="$H/guard" bash "$LOCK" >"$H/out" 2>&1 )
+[ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop exited non-zero under stubs"; cat "$H/out"; }
+for wt in "repo/.claude/worktrees/w1" "w2"; do
+  grep -q "schg .*$wt/.claude/settings.json" "$H/log" \
+    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock did not freeze $wt/.claude"; }
+  grep -q "^frozen=.*$wt/.claude\$" "$H"/guard/* \
+    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock did not record $wt/.claude in the marker"; }
+done
+grep -q "w3 has no .claude" "$H/out" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock did not report a worktree with no .claude"; }
+grep -q "worktrees/w1/src\|schg [^ ]*/repo/.claude/worktrees\$" "$H/log" \
+  && { FAIL=$((FAIL+1)); echo "  FAIL: the main freeze reached into .claude/worktrees/"; } || PASS=$((PASS+1))
+: > "$H/log"
+( cd "$H/w2" && PATH="$H/bin:$PATH" LOOP_GUARD_DIR="$H/guard" bash "$UNLOCK" >"$H/out" 2>&1 )
+[ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop exited non-zero under stubs"; cat "$H/out"; }
+for wt in "repo" "repo/.claude/worktrees/w1" "w2"; do
+  grep -q "noschg .*/$wt/.claude\$" "$H/log" \
+    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock (run from a worktree) did not lift $wt/.claude"; }
+done
+[ -z "$(ls "$H/guard")" ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock left the marker behind"; }
+
+echo "== G12: status warns about a worktree whose .claude is not frozen =="
+: > "$H/guard/$(key_for "$H/repo")"
+OUT=$(LOOP_GUARD_DIR="$H/guard" CLAUDE_PROJECT_DIR="$H/repo" bash "$STATUS" 2>&1)
+printf '%s' "$OUT" | grep -q "worktree .*w2 has an unfrozen .claude" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status did not warn about an unfrozen worktree .claude"; }
+rm -rf "$H"
+
 echo "== lock/unlock refuse to run without root (so a non-root agent cannot self-lock/unlock) =="
 LOOP_GUARD_DIR="$TG" bash "$LOCK"   >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop ran without root"; }
 LOOP_GUARD_DIR="$TG" bash "$UNLOCK" >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop ran without root"; }

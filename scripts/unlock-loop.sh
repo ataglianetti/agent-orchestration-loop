@@ -71,20 +71,38 @@ did=0
 # .claude subtree permanently frozen, which would lock the human out of their own config too.
 # Report only if it actually had been frozen. The directory's own flag is the signal: freeze_tree
 # sets it last, so if it is set the whole subtree was done.
-# Lift the link's own flag FIRST. On macOS an schg symlink cannot be replaced, and leaving it set
-# would survive the unlock invisibly — the tree would look released while .claude stayed pinned.
-if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && command -v chflags >/dev/null 2>&1; then
-  if ls -ldO "$CLAUDE_LINK" 2>/dev/null | grep -qw schg; then
-    chflags -h noschg "$CLAUDE_LINK" 2>/dev/null \
-      && { echo "  unfroze: $CLAUDE_LINK (the symlink itself)"; did=1; }
+unfreeze_claude() {
+  local CLAUDE_LINK="$1" CLAUDE_DIR="$1"
+  [ -L "$CLAUDE_DIR" ] && CLAUDE_DIR="$(cd "$CLAUDE_DIR" 2>/dev/null && pwd -P || printf '%s' "$CLAUDE_DIR")"
+  # Lift the link's own flag FIRST. On macOS an schg symlink cannot be replaced, and leaving it set
+  # would survive the unlock invisibly — the tree would look released while .claude stayed pinned.
+  if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && command -v chflags >/dev/null 2>&1; then
+    if ls -ldO "$CLAUDE_LINK" 2>/dev/null | grep -qw schg; then
+      chflags -h noschg "$CLAUDE_LINK" 2>/dev/null \
+        && { echo "  unfroze: $CLAUDE_LINK (the symlink itself)"; did=1; }
+    fi
   fi
-fi
+  if [ -d "$CLAUDE_DIR" ]; then
+    local was_frozen=0; is_frozen "$CLAUDE_DIR" && was_frozen=1
+    unfreeze_tree "$CLAUDE_DIR"
+    if [ "$was_frozen" -eq 1 ]; then echo "  unfroze: $CLAUDE_DIR (whole subtree — hook wiring editable again)"; did=1; fi
+  fi
+  return 0
+}
 
-if [ -d "$CLAUDE_DIR" ]; then
-  was_frozen=0; is_frozen "$CLAUDE_DIR" && was_frozen=1
-  unfreeze_tree "$CLAUDE_DIR"
-  [ "$was_frozen" -eq 1 ] && { echo "  unfroze: $CLAUDE_DIR (whole subtree — hook wiring editable again)"; did=1; }
-fi
+# The main checkout, every worktree git knows about now, and every directory the lock recorded as
+# frozen (G12). The recorded list catches a worktree that was moved or pruned since the lock.
+unfreeze_claude "$CLAUDE_LINK"
+while IFS= read -r WT; do
+  if [ -n "$WT" ]; then unfreeze_claude "$WT/.claude"; fi
+done <<EOF
+$(git -c safe.directory='*' -C "$REPO" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | tail -n +2 || true)
+EOF
+while IFS= read -r F; do
+  if [ -n "$F" ]; then unfreeze_claude "$F"; fi
+done <<EOF
+$(sed -n 's/^frozen=//p' "$MARKER" "$GUARD_DIR/$GUARD_LEGACY_KEY" 2>/dev/null | sort -u || true)
+EOF
 
 LEGACY="$GUARD_DIR/$GUARD_LEGACY_KEY"
 if [ "$LEGACY" != "$MARKER" ] && [ -f "$LEGACY" ]; then
