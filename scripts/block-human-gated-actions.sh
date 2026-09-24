@@ -68,13 +68,24 @@ deny() {
   exit 2
 }
 
-OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent): rm '$ROOT/.loop-active'"
+# Name the command that actually clears whichever marker holds the gate (G2). Under a hard lock,
+# `rm .loop-active` does nothing, and telling the human to run it sends them the wrong way.
+UNLOCK_CMD="sudo ./.claude/scripts/unlock-loop.sh"
+if [ -f "$HARD_MARKER" ] || [ -f "$LEGACY_MARKER" ]; then
+  if [ -f "$ROOT/.loop-active" ]; then
+    OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent), from inside the repo: $UNLOCK_CMD, then rm '$ROOT/.loop-active'"
+  else
+    OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent), from inside the repo: $UNLOCK_CMD"
+  fi
+else
+  OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent): rm '$ROOT/.loop-active'"
+fi
 
 # 1. Human-gated, outward-facing actions the loop must never take on its own.
 #    This is text matching, so it is a strong filter, not a wall: a command whose words are built
 #    at runtime (a variable holding "push", a base64 blob piped to sh) will pass it. The backstop
 #    that does not depend on matching text is branch protection on the remote — see README.
-SHIP_MSG="Blocked by the orchestrate loop guard: a workstream loop is active (.loop-active present). Opening/merging PRs and pushing are human-gated — the loop must never perform them on its own (it self-approved a PR once; this guard is why it cannot again). Write the approval card and stop instead. $OVERRIDE"
+SHIP_MSG="Blocked by the orchestrate loop guard: a workstream loop is active (a run marker is present). Opening/merging PRs and pushing are human-gated — the loop must never perform them on its own (it self-approved a PR once; this guard is why it cannot again). Write the approval card and stop instead. $OVERRIDE"
 
 # git global options that can sit between `git` and the subcommand. The ones that take a
 # separate argument are listed; every other option is a single `-x` / `--x` / `--x=y` token.
@@ -159,6 +170,12 @@ if printf '%s' "$CMD" | grep -Eiq '(api|uploads)\.github\.com' \
 fi
 if printf '%s' "$CMD" | grep -Eq 'gh[[:space:]]+auth[[:space:]]+(token|status[^|]*--show-token)|git'"$GIT_OPTS"'[[:space:]]+credential([[:space:]]+fill|-[[:alnum:]]+[[:space:]]+get)|security[[:space:]]+find-(internet|generic)-password[^|]*github'; then
   deny "Blocked by the orchestrate loop guard: reading the GitHub token while a loop is active is the first step of shipping around the guard. The loop does not need the raw token; gh and git use it on their own. $OVERRIDE"
+fi
+
+# 1f. Unlocking is human-only too. unlock-loop.sh needs sudo, but a machine with passwordless sudo
+#     would let the agent clear a hard lock the denials above name as the human's override.
+if printf '%s' "$CMD" | grep -Eq 'unlock-loop'; then
+  deny "Blocked by the orchestrate loop guard: unlocking is the human's act, never the loop's. Reach a hard stop, write the approval card, and end the run with the lock in place. $OVERRIDE"
 fi
 
 # 2. The marker is human-only. Removing or renaming it is the escape hatch, so it is walled

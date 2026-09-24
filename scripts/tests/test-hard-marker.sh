@@ -51,6 +51,16 @@ run 'git status --porcelain'; [ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL
 run 'npm test';               [ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: npm test blocked under hard lock"; }
 run 'git commit -m x';        [ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: commit blocked under hard lock"; }
 
+echo "== G2: under a hard lock the denial names unlock, not rm .loop-active =="
+ERR=$(printf '{"tool_name":"Bash","tool_input":{"command":"git push"}}' \
+  | LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$REPO" bash "$GUARD" 2>&1 >/dev/null)
+printf '%s' "$ERR" | grep -q 'sudo ./.claude/scripts/unlock-loop.sh' \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: hard-lock denial does not name unlock-loop.sh"; }
+printf '%s' "$ERR" | grep -q "rm '" \
+  && { FAIL=$((FAIL+1)); echo "  FAIL: hard-lock denial (no soft marker) still suggests rm .loop-active"; } || PASS=$((PASS+1))
+printf '%s' "$ERR" | grep -q '(.loop-active present)' \
+  && { FAIL=$((FAIL+1)); echo "  FAIL: hard-lock denial claims .loop-active is present"; } || PASS=$((PASS+1))
+
 echo "== remove the hard marker and the same push is allowed again =="
 rm -f "$TG/$KEY"
 run 'git push origin main';   [ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: push blocked with no marker present"; }

@@ -30,8 +30,8 @@ VERDICT: CONCERNS
 Personas: adversarial-reviewer, run, code-review (3 independent passes)
 Carried: settled — resolved F1, F5 · parked F4 → R-003 · rejected F7
 Carried: open — F6
-Seen-set: F1–F9 · 9 findings · 6 terminal, 3 open
-Progress: 3 settled, 2 new, 1 suppressed re-raise
+Seen-set: F1–F9 · 9 findings · 5 terminal, 4 open
+Progress: 4 settled, 2 new, 1 suppressed re-raise
 
 | ID  | SEVERITY         | reachability       | consensus | FLAG-HUMAN | disposition        | summary                       |
 | --- | ---------------- | ------------------ | --------- | ---------- | ------------------ | ----------------------------- |
