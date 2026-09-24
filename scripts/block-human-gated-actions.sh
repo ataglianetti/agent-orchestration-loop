@@ -178,6 +178,13 @@ if printf '%s' "$CMD" | grep -Eq 'unlock-loop'; then
   deny "Blocked by the orchestrate loop guard: unlocking is the human's act, never the loop's. Reach a hard stop, write the approval card, and end the run with the lock in place. $OVERRIDE"
 fi
 
+# 1g. `ungate` is the human's shell function for clearing the marker (loop-gate.zsh). The agent's
+#     shell loads the same rc files, so the function exists there too, and its name never shows
+#     `.loop-active` to the checks below. Block the name itself.
+if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])ungate([^[:alnum:]_-]|$)'; then
+  deny "Blocked by the orchestrate loop guard: ungate clears the run marker, and clearing the gate is the human's act, never the loop's. Reach a hard stop, write the approval card, and end the run with the marker in place. $OVERRIDE"
+fi
+
 # 2. The marker is human-only. Removing or renaming it is the escape hatch, so it is walled
 #    the same way shipping is. Truncating it is not blocked — an empty marker file still
 #    exists, so the gate still holds.
