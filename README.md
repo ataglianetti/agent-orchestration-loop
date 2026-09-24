@@ -79,7 +79,7 @@ The gate is a marker file the guard checks. There are two, and the difference is
 
   A marker is only as strong as the hook that reads it, and that hook lives entirely inside `.claude/` — a directory the agent owns as much as the marker. Unwiring the guard from in there is quieter than any rm, and a Bash guard can't even see an Edit-tool change to a file. There are at least three doors: `disableAllHooks` in `.claude/settings.json`; the same key in `.claude/settings.local.json`, which Claude Code honours too and which usually doesn't exist yet, so the agent can simply *create* it; or editing `exit 0` into the top of the hook script itself, touching no settings file at all.
 
-  So the hard lock **freezes the whole `.claude/` subtree** (`chflags schg` on macOS, `chattr +i` on Linux) while the run is locked. Both halves of that are load-bearing, because each blocks something the other doesn't:
+  So the hard lock **freezes the whole `.claude/` subtree except `.claude/worktrees/`** (`chflags schg` on macOS, `chattr +i` on Linux) while the run is locked. Worktrees stay writable because Claude Code keeps parallel worktrees there, and a frozen worktree can't be edited, committed in or removed. Nothing in `worktrees/` wires this repo's hook, and `.claude/` itself stays frozen, so `worktrees/` can't be renamed or swapped for a link. Both halves of that are load-bearing, because each blocks something the other doesn't:
 
   | Immutable | Create new file | Delete file | Edit existing file in place |
   |---|---|---|---|

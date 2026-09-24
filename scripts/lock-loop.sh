@@ -108,10 +108,17 @@ freeze() {
 # own state lives in docs/execution/, and the soft marker lives at the repo root. Nothing the loop
 # does during a run writes into .claude/.
 #
+# One exception: .claude/worktrees/. Claude Code puts parallel worktrees there, each a full
+# checkout, and a frozen worktree cannot be edited, committed in, or removed — the lock would stop
+# every parallel session in the repo. Nothing in there wires this repo's hook: Claude Code reads
+# settings from the project's own .claude/, not from a worktree nested inside it. The .claude
+# directory itself is still frozen, so worktrees/ cannot be renamed, replaced, or swapped for a
+# link; only what is inside it stays writable.
+#
 # Contents first, directory last (-depth): the directory's own flag is set once its children are
 # already done, which avoids depending on whether a given kernel lets you re-flag a child inside
 # an already-immutable parent.
-freeze_tree() {
+freeze_subtree() {
   local d="$1"
   if   command -v chflags >/dev/null 2>&1; then
     find "$d" -depth -exec chflags schg {} + 2>/dev/null
@@ -121,6 +128,16 @@ freeze_tree() {
   else
     echo "  WARNING: no chflags or chattr found — cannot freeze $d" >&2; return 1
   fi
+}
+
+freeze_tree() {
+  local root="$1" entry
+  for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue   # unmatched glob
+    [ "$entry" = "$root/worktrees" ] && continue
+    freeze_subtree "$entry" || return 1
+  done
+  freeze "$root"   # the directory itself, last
 }
 
 # Root-owned directory, not writable by anyone but root. This is what makes the marker inside it
@@ -159,9 +176,16 @@ fi
 # -d (not -L -a -d): CLAUDE_DIR is the RESOLVED path by now, so this can no longer pass on a
 # symlink whose contents were never walked.
 if [ -d "$CLAUDE_DIR" ]; then
+  # worktrees/ has to exist BEFORE the freeze: once .claude is immutable, nothing can create it,
+  # and the first parallel worktree of the run would fail. Owned like .claude, not by root.
+  if [ ! -e "$CLAUDE_DIR/worktrees" ]; then
+    OWNER="$(stat -f '%u:%g' "$CLAUDE_DIR" 2>/dev/null || stat -c '%u:%g' "$CLAUDE_DIR")"
+    mkdir "$CLAUDE_DIR/worktrees" && chown "$OWNER" "$CLAUDE_DIR/worktrees"
+  fi
   if freeze_tree "$CLAUDE_DIR"; then
-    echo "  frozen: $CLAUDE_DIR (whole subtree — the agent cannot unwire the guard while locked)"
+    echo "  frozen: $CLAUDE_DIR (whole subtree except worktrees/ — the agent cannot unwire the guard while locked)"
     echo "          this includes settings.json, settings.local.json, and the hook script itself"
+    echo "          worktrees/ stays writable so parallel worktrees keep working"
     # Freeze the LINK too, or the agent repoints .claude at a directory it does control and the
     # frozen target stops being the one Claude Code reads. -h flags the link, not its target.
     if [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ]; then

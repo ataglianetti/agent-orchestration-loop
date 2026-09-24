@@ -145,6 +145,27 @@ ln -s "$SL/real" "$SL/link"
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: pwd -P did not resolve the link to its target"; }
 rm -rf "$SL"
 
+echo "== the freeze skips .claude/worktrees/ and still covers everything else =="
+# G4: freezing worktrees/ made every parallel worktree immutable. Run the real freeze functions
+# against a stub chflags/chattr that logs its arguments instead of setting flags, so this needs no root.
+FW="$TG/fw"; mkdir -p "$FW/bin" "$FW/.claude/scripts" "$FW/.claude/worktrees/wt1/src" "$FW/.claude/.hidden"
+: > "$FW/.claude/settings.json"; : > "$FW/.claude/scripts/hook.sh"; : > "$FW/.claude/worktrees/wt1/src/a.ts"
+for tool in chflags chattr; do
+  printf '#!/bin/bash\nshift; printf "%%s\\n" "$@" >> "%s/log"\n' "$FW" > "$FW/bin/$tool"; chmod +x "$FW/bin/$tool"
+done
+PATH="$FW/bin:$PATH" bash -c "$(sed -n '/^freeze()/,/^}/p;/^freeze_subtree()/,/^}/p;/^freeze_tree()/,/^}/p' "$LOCK"); freeze_tree \"$FW/.claude\""
+grep -q 'worktrees' "$FW/log" \
+  && { FAIL=$((FAIL+1)); echo "  FAIL: the freeze touched .claude/worktrees/"; } || PASS=$((PASS+1))
+for f in settings.json scripts/hook.sh scripts .hidden; do
+  grep -qx "$FW/.claude/$f" "$FW/log" \
+    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: the freeze skipped .claude/$f"; }
+done
+[ "$(tail -n1 "$FW/log")" = "$FW/.claude" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: .claude itself must be frozen, and frozen last"; }
+grep -q 'mkdir "\$CLAUDE_DIR/worktrees"' "$LOCK" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop must create worktrees/ before freezing .claude"; }
+rm -rf "$FW"
+
 echo "== is_frozen reports false for an ordinary (unfrozen) file =="
 # Pull is_frozen out of loop-status and exercise its negative case without root.
 tmpf="$TG/plainfile"; : > "$tmpf"

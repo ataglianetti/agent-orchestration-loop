@@ -39,7 +39,7 @@ if [ "$soft_present" -eq 1 ] || [ "$hard_present" -eq 1 ]; then
   [ "$hard_present" -eq 1 ] && echo "  hard: $HARD (root-owned; clear with: sudo ./.claude/scripts/unlock-loop.sh)"
   [ "$soft_present" -eq 1 ] && echo "  soft: $SOFT (clear with: rm '$SOFT')"
   if [ "$frozen" -eq 1 ]; then
-    echo "  hook wiring frozen: $CLAUDE_DIR (whole subtree; unlock lifts it)"
+    echo "  hook wiring frozen: $CLAUDE_DIR (whole subtree except worktrees/; unlock lifts it)"
     [ "$CLAUDE_LINK" != "$CLAUDE_DIR" ] && echo "    via symlink: $CLAUDE_LINK"
   fi
   exit 0
