@@ -231,7 +231,7 @@ LOOP_GUARD_DIR="$TG" bash "$LOCK"   >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PAS
 LOOP_GUARD_DIR="$TG" bash "$UNLOCK" >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop ran without root"; }
 
 # The hook-config freeze uses schg (macOS) / +i (Linux), which need root to set — so, like the
-# root-owned marker, the freeze itself is proven by the sudo smoke test, not here. This suite
+# root-owned marker, the freeze itself is proven by the sudo smoke test (smoke-hard-lock.sh), not here. This suite
 # verifies the wiring is present: lock freezes the hook config, unlock lifts it, status reports it.
 echo "== the hook-config freeze is wired into lock/unlock/status =="
 grep -q 'chflags schg\|chattr +i' "$LOCK"        && grep -q 'freeze_tree "\$CLAUDE_DIR"' "$LOCK"     && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop does not freeze the hook config subtree"; }
