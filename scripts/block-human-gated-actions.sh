@@ -42,14 +42,26 @@ ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
 #     write to, so NO command the agent runs — string-matched or not — can remove it. Only
 #     `sudo unlock-loop.sh` clears it. LOOP_GUARD_DIR is overridable so the suite can test the
 #     hard path without root.
-# The hard marker's path must be computed identically here and in lock-loop.sh / unlock-loop.sh /
-# loop-status.sh, or they will not agree on the same file. Key it on the git repo root — the one
-# value all four can resolve the same way regardless of install layout (.claude/scripts vs scripts)
-# or where the command was invoked. Fall back to $ROOT if this is somehow not a git repo.
 LOOP_GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
-GUARD_REPO="$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$ROOT")"
+# >>> guard key: keep this block byte-identical in block-human-gated-actions.sh, lock-loop.sh,
+# unlock-loop.sh and loop-status.sh. The test suite compares the four copies.
+# The hard marker is keyed on the repo's SHARED git directory (--git-common-dir), resolved from the
+# project dir, else the current directory. Every worktree of a repo shares that directory, so one
+# lock covers them all, and the key does not depend on where these scripts happen to live — a
+# symlinked .claude pointing into another repo no longer changes it. safe.directory='*' because
+# lock and unlock run git as root inside a repo the human owns; command-line config is honoured.
+KEY_BASE="${CLAUDE_PROJECT_DIR:-$PWD}"
+GUARD_REPO="$(cd "$KEY_BASE" 2>/dev/null && d="$(git -c safe.directory='*' rev-parse --git-common-dir 2>/dev/null)" && cd "$d" 2>/dev/null && pwd -P || true)"
+GUARD_MAIN="$(git -c safe.directory='*' -C "$KEY_BASE" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p' || true)"
+GUARD_KEY="$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
+# Before this key existed, the marker was keyed on a checkout's root. Honour and clear that key
+# too, so a lock taken before the upgrade is neither ignored nor left behind.
+GUARD_LEGACY_KEY="$(printf '%s' "$(git -c safe.directory='*' -C "$KEY_BASE" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")" | cksum | cut -d' ' -f1)"
+# <<< guard key
+[ -n "$GUARD_REPO" ] || GUARD_REPO="$ROOT"   # not a git repo: key on the project dir itself
 HARD_MARKER="$LOOP_GUARD_DIR/$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
-[ -f "$ROOT/.loop-active" ] || [ -f "$HARD_MARKER" ] || exit 0   # no active loop → no restriction
+LEGACY_MARKER="$LOOP_GUARD_DIR/$GUARD_LEGACY_KEY"
+[ -f "$ROOT/.loop-active" ] || [ -f "$HARD_MARKER" ] || [ -f "$LEGACY_MARKER" ] || exit 0   # no active loop → no restriction
 
 deny() {
   printf '%s\n' "$1" >&2

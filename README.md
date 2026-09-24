@@ -110,10 +110,12 @@ The gate is a marker file the guard checks. There are two, and the difference is
   The route that ends this class rather than extending it is [`/etc/claude-code/managed-settings.json`](https://code.claude.com/docs/en/settings) with `allowManagedHooksOnly: true` — root-owned, above user and project settings, and per the docs only managed settings can disable managed hooks. No freezing, and no list of filenames to keep current.
 
   ```bash
-  sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate — drops the hard marker
+  sudo ./.claude/scripts/lock-loop.sh     # before /orchestrate, from inside the repo — drops the hard marker
   # ... run /orchestrate <id> as usual; planner and executors need no sudo ...
   sudo ./.claude/scripts/unlock-loop.sh   # after you act on the card — clears it
   ```
+
+  The lock is keyed on the repo you run it from, not on where the scripts live, and one lock covers every git worktree of that repo: a session in any of them is gated. Only the main checkout's `.claude/` is frozen, though. A session inside a worktree reads that worktree's own `.claude/`, which the lock leaves writable (G12 in `docs/KNOWN-GATE-ISSUES.md`).
 
   `./.claude/scripts/loop-status.sh` reports which marker (if any) holds the gate. **Lock when a rogue ship would reach something real and you won't be watching** — solo repos with no downstream review, unattended or overnight runs, direct-to-main. **Skip it** for supervised runs, throwaway branches, or repos whose own branch protection already gates merges; there the `sudo` is friction for nothing and the soft default is enough.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Clear the HARD run marker for this repo. The counterpart to lock-loop.sh.
 #
-#   Run:  sudo ./.claude/scripts/unlock-loop.sh
+#   Run:  sudo ./.claude/scripts/unlock-loop.sh   (from inside the repo, or any of its worktrees)
 #
 # This is the ONE act that has to happen outside the thing being gated. The marker is root-owned,
 # so removing it needs root — which the agent never has. Run this after you have read the approval
@@ -17,8 +17,27 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 GUARD_DIR="${LOOP_GUARD_DIR:-/var/run/loop-guard}"
-REPO="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P))"
-KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
+# >>> guard key: keep this block byte-identical in block-human-gated-actions.sh, lock-loop.sh,
+# unlock-loop.sh and loop-status.sh. The test suite compares the four copies.
+# The hard marker is keyed on the repo's SHARED git directory (--git-common-dir), resolved from the
+# project dir, else the current directory. Every worktree of a repo shares that directory, so one
+# lock covers them all, and the key does not depend on where these scripts happen to live — a
+# symlinked .claude pointing into another repo no longer changes it. safe.directory='*' because
+# lock and unlock run git as root inside a repo the human owns; command-line config is honoured.
+KEY_BASE="${CLAUDE_PROJECT_DIR:-$PWD}"
+GUARD_REPO="$(cd "$KEY_BASE" 2>/dev/null && d="$(git -c safe.directory='*' rev-parse --git-common-dir 2>/dev/null)" && cd "$d" 2>/dev/null && pwd -P || true)"
+GUARD_MAIN="$(git -c safe.directory='*' -C "$KEY_BASE" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p' || true)"
+GUARD_KEY="$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
+# Before this key existed, the marker was keyed on a checkout's root. Honour and clear that key
+# too, so a lock taken before the upgrade is neither ignored nor left behind.
+GUARD_LEGACY_KEY="$(printf '%s' "$(git -c safe.directory='*' -C "$KEY_BASE" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")" | cksum | cut -d' ' -f1)"
+# <<< guard key
+if [ -z "$GUARD_REPO" ] || [ -z "$GUARD_MAIN" ]; then
+  echo "$(basename "$0"): $KEY_BASE is not inside a git repository. Run it from inside the repo." >&2
+  exit 1
+fi
+REPO="$(cd "$GUARD_MAIN" && pwd -P)"   # the main checkout: its .claude is the one frozen
+KEY="$GUARD_KEY"
 MARKER="$GUARD_DIR/$KEY"
 CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
@@ -65,6 +84,13 @@ if [ -d "$CLAUDE_DIR" ]; then
   was_frozen=0; is_frozen "$CLAUDE_DIR" && was_frozen=1
   unfreeze_tree "$CLAUDE_DIR"
   [ "$was_frozen" -eq 1 ] && { echo "  unfroze: $CLAUDE_DIR (whole subtree — hook wiring editable again)"; did=1; }
+fi
+
+LEGACY="$GUARD_DIR/$GUARD_LEGACY_KEY"
+if [ "$LEGACY" != "$MARKER" ] && [ -f "$LEGACY" ]; then
+  rm -f "$LEGACY"
+  echo "  removed: $LEGACY (a lock taken before the guard key changed)"
+  did=1
 fi
 
 if [ -f "$MARKER" ]; then

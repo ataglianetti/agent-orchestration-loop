@@ -5,12 +5,9 @@
 #
 # The hard marker is a root-owned file outside the repo, dropped by `sudo lock-loop.sh`. Creating
 # it for real needs root, so this suite fakes it: it points LOOP_GUARD_DIR at a temp directory and
-# derives the marker's key exactly as every part of the system does — cksum of the git repo root.
-# That exercises every code path except the root ownership itself, which is an OS property.
-#
-# In production CLAUDE_PROJECT_DIR IS the git repo root, so the hook (which keys on
-# CLAUDE_PROJECT_DIR) and the lock/unlock/status scripts (which key on their own repo) resolve the
-# same key. This suite mirrors that: it uses the real repo root as the project dir.
+# derives the marker's key with the same "guard key" block every part of the system runs — cksum of
+# the repo's shared git directory. That exercises every code path except the root ownership
+# itself, which is an OS property.
 
 GUARD="$(cd "$(dirname "$0")/.." && pwd)/block-human-gated-actions.sh"
 LOCK="$(cd "$(dirname "$0")/.." && pwd)/lock-loop.sh"
@@ -20,7 +17,13 @@ PASS=0
 FAIL=0
 
 REPO="$(git -C "$(dirname "$GUARD")" rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$GUARD")/../.." && pwd -P))"
-KEY="$(printf '%s' "$REPO" | cksum | cut -d' ' -f1)"
+guard_block() { sed -n '/^# >>> guard key/,/^# <<< guard key/p' "$1"; }
+# The block ends on a comment line, so anything run after it must start on a new line.
+key_for() { # $1 = project dir → the hard-marker key the real block derives for it
+  CLAUDE_PROJECT_DIR="$1" bash -c "$(guard_block "$GUARD")
+printf '%s' \"\$GUARD_KEY\""
+}
+KEY="$(key_for "$REPO")"
 
 # A real soft marker in the repo would mask the "remove hard marker → allowed again" case.
 if [ -f "$REPO/.loop-active" ]; then
@@ -29,7 +32,7 @@ if [ -f "$REPO/.loop-active" ]; then
 fi
 
 TG=$(mktemp -d)            # fake guard dir (stands in for /var/run/loop-guard)
-trap 'rm -f "$TG/$KEY"; rmdir "$TG" 2>/dev/null' EXIT
+trap 'rm -rf "$TG"' EXIT
 
 run() { # $1 = command  (project dir is always the real repo root, as in production)
   printf '{"tool_name":"Bash","tool_input":{"command":%s}}' "$(printf '%s' "$1" | jq -Rs .)" \
@@ -54,11 +57,76 @@ run 'git push origin main';   [ $? -eq 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL
 
 echo "== loop-status.sh reports the hard lock (read-only, no root) =="
 : > "$TG/$KEY"
-OUT=$(LOOP_GUARD_DIR="$TG" bash "$STATUS" 2>/dev/null); RC=$?
+OUT=$(LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$REPO" bash "$STATUS" 2>/dev/null); RC=$?
 { [ $RC -eq 0 ] && printf '%s' "$OUT" | grep -q '^ACTIVE'; } && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status did not report ACTIVE for a hard lock"; }
 rm -f "$TG/$KEY"
-OUT=$(LOOP_GUARD_DIR="$TG" bash "$STATUS" 2>/dev/null); RC=$?
+OUT=$(LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$REPO" bash "$STATUS" 2>/dev/null); RC=$?
 { [ $RC -eq 1 ] && printf '%s' "$OUT" | grep -q '^INACTIVE'; } && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status did not report INACTIVE with no marker"; }
+
+echo "== G5: one key derivation, shared by all four scripts =="
+REF="$(guard_block "$GUARD")"
+[ -n "$REF" ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: the hook has no guard-key block"; }
+for f in "$LOCK" "$UNLOCK" "$STATUS"; do
+  [ "$(guard_block "$f")" = "$REF" ] \
+    && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: $(basename "$f") guard-key block differs from the hook's"; }
+done
+if grep -q 'dirname "${BASH_SOURCE\[0\]}")" rev-parse --show-toplevel' "$LOCK" "$UNLOCK" "$STATUS"; then
+  FAIL=$((FAIL+1)); echo "  FAIL: a script still keys the lock on its own location"
+else PASS=$((PASS+1)); fi
+
+echo "== G5: every worktree of a repo gets the same key; another repo does not =="
+WT="$TG/wt"; mkdir -p "$WT"
+git -C "$WT" init -q main && git -C "$WT/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$WT/main" worktree add -q "$WT/main/.claude/worktrees/w1" -b w1 2>/dev/null
+git -C "$WT/main" worktree add -q "$WT/elsewhere" -b w2 2>/dev/null
+mkdir -p "$WT/main/src"
+K_MAIN="$(key_for "$WT/main")"
+[ "$(key_for "$WT/main/src")" = "$K_MAIN" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a subdirectory keyed differently from its repo"; }
+[ "$(key_for "$WT/main/.claude/worktrees/w1")" = "$K_MAIN" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a worktree under .claude/worktrees keyed differently from its repo"; }
+[ "$(key_for "$WT/elsewhere")" = "$K_MAIN" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a worktree outside the repo keyed differently from its repo"; }
+git -C "$WT" init -q other
+[ "$(key_for "$WT/other")" != "$K_MAIN" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: two different repos share a key"; }
+[ "$(CLAUDE_PROJECT_DIR="$WT/elsewhere" bash -c "$(guard_block "$GUARD")
+printf '%s' \"\$GUARD_MAIN\"")" = "$(cd "$WT/main" && pwd -P)" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: GUARD_MAIN did not resolve a worktree to the main checkout"; }
+
+echo "== G5: a hard lock gates a session running in a worktree =="
+: > "$TG/$K_MAIN"
+printf '{"tool_name":"Bash","tool_input":{"command":"git push"}}' \
+  | LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$WT/elsewhere" bash "$GUARD" 2>/dev/null
+[ $? -eq 2 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a worktree session was not gated by the repo's hard lock"; }
+OUT=$(LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$WT/main/.claude/worktrees/w1" bash "$STATUS" 2>/dev/null)
+printf '%s' "$OUT" | grep -q '^ACTIVE' \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status in a worktree did not see the repo's hard lock"; }
+OUT=$(LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$WT/main" bash "$STATUS" 2>&1)
+printf '%s' "$OUT" | grep -q 'WARNING: these scripts live in' \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status did not warn that its own repo differs from the checked repo"; }
+rm -f "$TG/$K_MAIN"
+
+echo "== G5: outside a git repo, the block survives set -e so lock/unlock can say why =="
+NG="$TG/notgit"; mkdir -p "$NG"
+( cd "$NG" && bash -c "set -euo pipefail
+$(guard_block "$LOCK")
+printf reached" 2>/dev/null ) | grep -q reached \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: the guard-key block aborts under set -e outside a repo"; }
+rmdir "$NG"
+
+echo "== G5: a lock taken under the old key is still honoured =="
+LEGACY_KEY="$(printf '%s' "$(git -C "$WT/other" rev-parse --show-toplevel)" | cksum | cut -d' ' -f1)"
+: > "$TG/$LEGACY_KEY"
+printf '{"tool_name":"Bash","tool_input":{"command":"git push"}}' \
+  | LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$WT/other" bash "$GUARD" 2>/dev/null
+[ $? -eq 2 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: the hook ignored a lock taken under the old key"; }
+OUT=$(LOOP_GUARD_DIR="$TG" CLAUDE_PROJECT_DIR="$WT/other" bash "$STATUS" 2>/dev/null)
+printf '%s' "$OUT" | grep -q '^ACTIVE' \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status ignored a lock taken under the old key"; }
+grep -q 'GUARD_LEGACY_KEY' "$UNLOCK" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop does not clear a lock taken under the old key"; }
+rm -f "$TG/$LEGACY_KEY"; rm -rf "$WT"
 
 echo "== lock/unlock refuse to run without root (so a non-root agent cannot self-lock/unlock) =="
 LOOP_GUARD_DIR="$TG" bash "$LOCK"   >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop ran without root"; }
