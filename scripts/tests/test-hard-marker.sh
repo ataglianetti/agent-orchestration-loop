@@ -226,6 +226,28 @@ grep -q 'type l -exec chflags -h noschg' "$UNLOCK" \
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock must clear flags on symlinks with -h"; }
 rm -rf "$H"
 
+echo "== loop-status sees soft markers in other worktrees, without changing its own verdict =="
+LS="$TG/ls"; mkdir -p "$LS"
+git -C "$LS" init -q r && git -C "$LS/r" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$LS/r" worktree add -q "$LS/w b" -b w 2>/dev/null
+: > "$LS/w b/.loop-active"
+OUT=$( cd "$LS/r" && LOOP_GUARD_DIR="$TG/ls-guard" bash "$STATUS" 2>/dev/null ); RC=$?
+{ [ $RC -eq 1 ] && printf '%s' "$OUT" | grep -q '^INACTIVE'; } \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a gated worktree changed the main checkout's verdict or exit code"; }
+printf '%s' "$OUT" | grep -q "w b/.loop-active" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status from the main checkout did not list the worktree's marker"; }
+: > "$LS/r/.loop-active"
+OUT=$( cd "$LS/w b" && LOOP_GUARD_DIR="$TG/ls-guard" bash "$STATUS" 2>/dev/null ); RC=$?
+{ [ $RC -eq 0 ] && printf '%s' "$OUT" | grep -q '^ACTIVE'; } \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status in a gated worktree did not report ACTIVE"; }
+printf '%s' "$OUT" | grep -q "^    .*/r/.loop-active" \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status in a worktree did not list the main checkout's marker"; }
+[ "$(printf '%s' "$OUT" | grep -c 'w b/.loop-active')" = "1" ] \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status listed its own checkout's marker as another worktree's"; }
+printf '%s' "$OUT" | grep -q "rm '" \
+  && { FAIL=$((FAIL+1)); echo "  FAIL: status still suggests rm for the soft marker"; } || PASS=$((PASS+1))
+rm -rf "$LS"
+
 echo "== lock/unlock refuse to run without root (so a non-root agent cannot self-lock/unlock) =="
 LOOP_GUARD_DIR="$TG" bash "$LOCK"   >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: lock-loop ran without root"; }
 LOOP_GUARD_DIR="$TG" bash "$UNLOCK" >/dev/null 2>&1; [ $? -ne 0 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: unlock-loop ran without root"; }
