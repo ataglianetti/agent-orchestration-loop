@@ -10,11 +10,6 @@ Open defects in the loop's human gate (the ship guard, the soft and hard run mar
 | --- | ---------------- | ------------------------------------------------------------------------ | ------- | --------------- |
 | G2  | NOTE             | `scripts/block-human-gated-actions.sh` — section 1 deny message          | Under a hard lock with no soft marker, the deny message still tells the user to `rm .loop-active`, which does nothing. | Name `sudo unlock-loop.sh` when the hard marker is what holds the gate. |
 
-## Soft marker
-
-| ID  | Severity         | Where                                                        | Problem | Recommended fix |
-| --- | ---------------- | ------------------------------------------------------------ | ------- | --------------- |
-| G3  | WARNING (live)   | `scripts/block-human-gated-actions.sh` — sections 2–3        | The soft marker can still be removed: `git stash -a` / `git stash --include-ignored`, a `-x` flag that is not the first flag after `git clean`, an interpreter `rename` (Python `os.rename`, Node `fs.renameSync`, `shutil.move`, Perl `rename`), or a filename built at runtime so the literal `.loop-active` never appears. The same matcher also false-positives on text that merely mentions the marker near the word "unlink". | Add the stash, clean-flag and rename forms. Document runtime-built names as a limit of the soft marker, which is what the hard lock is for. Accept the false positives: the gate fails closed. |
 
 ## Hard lock
 

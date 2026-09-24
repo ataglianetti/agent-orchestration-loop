@@ -171,15 +171,31 @@ if printf '%s' "$CMD" | grep -Fq '.loop-active'; then
   # hole a pure verb match leaves open, and the categorical fix is the hard marker, not this list.
   if printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_.-])(rm|unlink|shred|mv)([[:space:]]|$)' \
     || printf '%s' "$CMD" | grep -Eq '(^|[^[:alnum:]_-])-delete([[:space:]]|$)' \
-    || printf '%s' "$CMD" | grep -Eq 'os\.(remove|unlink)|shutil\.rmtree|\.unlink\(|(^|[^[:alnum:]_])unlink[[:space:](]|fs\.(unlink|rm)|rmSync|File\.(delete|unlink)|Remove-Item'; then
-    deny "Blocked by the orchestrate loop guard: the .loop-active marker is human-only. The loop writes it at run start and never removes it — if the loop could clear its own gate, the gate would not be a gate. This includes deleting it through a language runtime (os.remove, fs.unlink, unlink), not only shell rm. Reach a hard stop (clean exit, FLAG-HUMAN, or non-convergence), write the approval card, and end the run with the marker in place. $OVERRIDE"
+    || printf '%s' "$CMD" | grep -Eq 'os\.(remove|unlink)|shutil\.rmtree|\.unlink\(|(^|[^[:alnum:]_])unlink[[:space:](]|fs\.(unlink|rm)|rmSync|File\.(delete|unlink)|Remove-Item' \
+    || printf '%s' "$CMD" | grep -Eq 'os\.(rename|replace)|shutil\.(move|copyfile)|fs\.rename|renameSync|File\.(rename|move)|\.(rename|replace)\(|(^|[^[:alnum:]_])rename[[:space:](]|Move-Item|Rename-Item'; then
+    # The last line is renames: moving the marker away clears the gate as surely as deleting it
+    # (Python os.rename / Path.rename, Node fs.renameSync, shutil.move, Perl and Ruby rename,
+    # PowerShell Move-Item). `.replace(` also matches string replacement, which is a false
+    # positive only when the command names the marker; the gate fails closed.
+    deny "Blocked by the orchestrate loop guard: the .loop-active marker is human-only. The loop writes it at run start and never removes it — if the loop could clear its own gate, the gate would not be a gate. This includes deleting or renaming it through a language runtime (os.remove, fs.unlink, os.rename, fs.renameSync), not only shell rm and mv. Reach a hard stop (clean exit, FLAG-HUMAN, or non-convergence), write the approval card, and end the run with the marker in place. $OVERRIDE"
   fi
 fi
 
 # 3. `git clean` with -x/-X reaches ignored files, and the marker is gitignored — so this is
-#    marker removal by another name.
-if printf '%s' "$CMD" | grep -Eq 'git[[:space:]]+((-C|-c)[[:space:]]+[^[:space:]]+[[:space:]]+)*clean([[:space:]]+-[^[:space:]]*[xX])'; then
+#    marker removal by another name. The -x may be any flag after `clean`, not only the first
+#    (`git clean -f -x`, `git clean -d --force -X`), so match within the whole command segment.
+if printf '%s' "$CMD" | grep -Eq 'git'"$GIT_OPTS"'[[:space:]]+clean([^|;&]*[[:space:]])?-[[:alnum:]]*[xX]'; then
   deny "Blocked by the orchestrate loop guard: 'git clean' with -x/-X removes ignored files, and .loop-active is gitignored — that clears the human gate. Use 'git clean -fd' (which leaves ignored files alone) if you need to clean the tree mid-run. $OVERRIDE"
 fi
+
+# 4. `git stash -a` / `--all` / `--include-ignored` moves ignored files into the stash, and the
+#    marker is gitignored — so the marker leaves the tree with it. Plain stash and -u do not.
+if printf '%s' "$CMD" | grep -Eq 'git'"$GIT_OPTS"'[[:space:]]+stash([^|;&]*[[:space:]])?(-[[:alnum:]]*a[[:alnum:]]*|--all|--include-ignored)([[:space:]]|$)'; then
+  deny "Blocked by the orchestrate loop guard: 'git stash' with -a, --all or --include-ignored stashes ignored files, and .loop-active is gitignored — that clears the human gate. $OVERRIDE"
+fi
+
+# Limit: every check above needs the marker's name, or a known verb, to appear in the command.
+# A name built at runtime (a variable, base64, a glob like .loop-a*) passes them. That is not a
+# list to extend; it is what the hard lock is for — its marker cannot be removed by any command.
 
 exit 0

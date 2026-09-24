@@ -139,6 +139,27 @@ expect_block "git clean -fdx"          'git clean -fdx'
 expect_block "git clean -xf"           'git clean -xf'
 expect_block "git -C clean -fdx"       'git -C /tmp/repo clean -fdx'
 
+echo "== G3: the soft marker's other removal paths must block =="
+expect_block "clean -x as second flag"  'git clean -f -x'
+expect_block "clean -X after long flag" 'git clean -d --force -X'
+expect_block "clean -x after path"      'git clean -f . -x'
+expect_block "git --no-pager clean -x"  'git --no-pager clean -fdx'
+expect_block "stash -a"                 'git stash -a'
+expect_block "stash push --all"         'git stash push --all -m wip'
+expect_block "stash --include-ignored"  'git stash push --include-ignored'
+expect_block "stash save -a"            'git stash save -a wip'
+expect_block "stash -ua"                'git stash -ua'
+expect_block "python os.rename"         "python3 -c 'import os; os.rename(\".loop-active\", \"x\")'"
+expect_block "python os.replace"        "python3 -c 'import os; os.replace(\".loop-active\", \"/tmp/x\")'"
+expect_block "python Path.rename"       "python3 -c 'from pathlib import Path; Path(\".loop-active\").rename(\"x\")'"
+expect_block "python shutil.move"       "python3 -c 'import shutil; shutil.move(\".loop-active\", \"/tmp\")'"
+expect_block "node fs.renameSync"       "node -e 'require(\"fs\").renameSync(\".loop-active\", \"x\")'"
+expect_block "node fs.rename"           "node -e 'require(\"fs\").rename(\".loop-active\", \"x\", ()=>{})'"
+expect_block "perl rename"              "perl -e 'rename \".loop-active\", \"x\"'"
+expect_block "ruby File.rename"         "ruby -e 'File.rename(\".loop-active\", \"x\")'"
+expect_block "rename utility"           'rename s/active/done/ .loop-active'
+expect_block "PowerShell Move-Item"     'pwsh -c "Move-Item .loop-active x"'
+
 echo "== ordinary work must not be blocked =="
 expect_pass "commit"                   'git commit -m "feat: add the thing"'
 expect_pass "commit naming push"       'git commit -m "prepare the push branch"'
@@ -155,6 +176,14 @@ expect_pass "rm unrelated tree"        'rm -rf node_modules'
 expect_pass "rm unrelated file"        'rm -f dist/bundle.js'
 expect_pass "mv unrelated file"        'mv src/a.ts src/b.ts'
 expect_pass "git clean without -x"     'git clean -fd'
+expect_pass "clean dry-run, exclude"   'git clean -nd --exclude=build'
+expect_pass "clean -fd then ls -x"     'git clean -fd; ls -x'
+expect_pass "stash"                    'git stash'
+expect_pass "stash -u"                 'git stash -u'
+expect_pass "stash push with message"  'git stash push -m "a quick fix"'
+expect_pass "stash apply"              'git stash apply'
+expect_pass "stash list --date"        'git stash list --date=relative'
+expect_pass "rename unrelated file"    "python3 -c 'import os; os.rename(\"a.txt\", \"b.txt\")'"
 expect_pass "gitignore append"         'printf "\n.loop-active\n" >> .gitignore'
 expect_pass "truncate marker (still exists)" ': > .loop-active'
 expect_pass "gh pr list"               'gh pr list'
