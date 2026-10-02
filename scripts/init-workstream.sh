@@ -49,11 +49,20 @@ cat > "$BASE_DIR/README.md" <<README
 
 ## Loop Config
 
-<!-- Read by /orchestrate. round_cap = max rounds before a non-convergence stop. -->
+<!-- Read by /orchestrate. round_cap = max rounds before a non-convergence stop.
+     model_* = alias each spawn runs on (haiku / sonnet / opus, or inherit = the session's model).
+     See "Model routing" in orchestrate.md for how tiers and the reviewer floor apply. -->
 
 - round_cap: 5
 - posture: aggressive
 - escalate_to_engineer: off
+- model_planner: opus
+- model_mechanical: sonnet
+- model_standard: sonnet
+- model_hard: opus
+- model_verify: sonnet
+- model_review: opus
+- model_review_light: sonnet
 README
 
 echo "Created workstream scaffold: $BASE_DIR"

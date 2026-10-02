@@ -31,7 +31,16 @@ If you ideate in a notes system (an Obsidian vault, a `docs/` tree, a design wik
 3. **Identify the work.** Break the goal into discrete tasks — each **atomic** (one logical change, one session), **testable** (a clear way to verify), and **scoped** (lists the files it touches).
 4. **Map dependencies.** Which tasks block others; which are independent.
 5. **Group into waves.** Independent tasks share a wave; dependents go later. Getting parallelism right is the plan's main value.
-6. **Flag risks.** What could go wrong; what you're assuming.
+6. **Tier every task.** The tier sets which model runs it, so tag by what the task demands, not by how important it is:
+
+   | Tier | When |
+   | --- | --- |
+   | `mechanical` | Follows an existing pattern with no behavior judgment: rename, move, wire a prop through, add a test shaped like its neighbors, change a config value. |
+   | `standard` | A scoped behavior change inside one subsystem, with a validation command that settles whether it worked. |
+   | `hard` | Any of: crosses subsystems; touches state, async or concurrency; touches a guardrail, API contract or security surface; the spec is ambiguous enough that the executor must make a design call; or you can't write a validation command that settles it. |
+
+   When unsure between two tiers, pick the higher one. The orchestrator can raise a tier, never lower it.
+7. **Flag risks.** What could go wrong; what you're assuming.
 
 ## Output Format
 
@@ -46,6 +55,7 @@ If you ideate in a notes system (an Obsidian vault, a `docs/` tree, a design wik
 
 ### Wave 1 (parallel)
 **Task 1.1: [Short title]**
+- Tier: mechanical | standard | hard — [one clause: why]
 - Files: `path/to/file.ts`
 - Change: [What to do]
 - Verify: [How to confirm it worked]
@@ -53,6 +63,7 @@ If you ideate in a notes system (an Obsidian vault, a `docs/` tree, a design wik
 ### Wave 2 (depends on Wave 1)
 **Task 2.1: [Short title]**
 - Depends on: 1.1
+- Tier: mechanical | standard | hard — [one clause: why]
 - Files: `path/to/file.ts`
 - Change: [What to do]
 - Verify: [How to confirm it worked]
@@ -68,6 +79,7 @@ If you ideate in a notes system (an Obsidian vault, a `docs/` tree, a design wik
 
 - **Never write code or workstream files.** Plan only; return it to the orchestrator.
 - **File paths are mandatory.** Every task lists the actual files it touches.
+- **Every task carries a tier.** An untiered task can't be routed to a model.
 - **One task = one commit.** If a task touches 10+ files, split it.
 - **Respect existing patterns.** Match the guide and the codebase; don't propose architectural changes unless the goal requires them.
 - **Input file is primary; traversed notes bound scope, never expand it.**
