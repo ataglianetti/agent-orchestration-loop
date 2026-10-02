@@ -121,6 +121,23 @@ rr 900000
 [ "$(grep -c '^## Run record' "$WS/README.md")" -eq 1 ] && grep -q "(0.9M output)" "$WS/README.md"
 check "a re-run replaces the section instead of adding a second one" $?
 
+echo "== install.sh .gitignore =="
+if [ -f "$KIT/install.sh" ]; then  # absent where the suite runs from an installed copy
+  IR="$T/install target"; mkdir -p "$IR"; git init -q "$IR"
+  printf 'node_modules/\n' > "$IR/.gitignore"
+  bash "$KIT/install.sh" "$IR" >/dev/null 2>&1
+  for p in docs/execution/active/a/SESSIONS.log docs/execution/done/a/COST.html docs/execution/done/a/cost.json; do
+    git -C "$IR" check-ignore -q "$p"; check "install ignores $p" $?
+  done
+  ! git -C "$IR" check-ignore -q docs/execution/done/a/README.md; check "install keeps the workstream README tracked" $?
+  grep -qxF "node_modules/" "$IR/.gitignore"; check "install keeps the repo's existing ignore rules" $?
+  bash "$KIT/install.sh" "$IR" >/dev/null 2>&1
+  [ "$(grep -cxF 'docs/execution/**/SESSIONS.log' "$IR/.gitignore")" -eq 1 ] && [ "$(grep -cxF '.loop-active' "$IR/.gitignore")" -eq 1 ]
+  check "a second install adds no duplicate ignore lines" $?
+else
+  echo "  SKIP: no install.sh beside this suite (installed copy)"
+fi
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
