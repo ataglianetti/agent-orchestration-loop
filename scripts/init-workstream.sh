@@ -51,7 +51,9 @@ cat > "$BASE_DIR/README.md" <<README
 
 <!-- Read by /orchestrate. round_cap = max rounds before a non-convergence stop.
      model_* = alias each spawn runs on (haiku / sonnet / opus, or inherit = the session's model).
-     See "Model routing" in orchestrate.md for how tiers and the reviewer floor apply. -->
+     See "Model routing" in orchestrate.md for how tiers and the reviewer floor apply.
+     Optional, read at close: plan_name / plan_price (e.g. "- plan_price: 200") add a COST.html
+     that prices this run's tokens at API rates against that flat fee. -->
 
 - round_cap: 5
 - posture: aggressive

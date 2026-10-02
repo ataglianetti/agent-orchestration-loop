@@ -33,6 +33,14 @@ cp "$KIT_DIR/scripts/loop-gate.zsh"                "$TARGET/.claude/scripts/loop
 cp "$KIT_DIR/scripts/lock-loop.sh"                 "$TARGET/.claude/scripts/lock-loop.sh"
 cp "$KIT_DIR/scripts/unlock-loop.sh"               "$TARGET/.claude/scripts/unlock-loop.sh"
 cp "$KIT_DIR/scripts/loop-status.sh"               "$TARGET/.claude/scripts/loop-status.sh"
+# Run record: the hook notes which sessions worked each workstream; the PM's close step
+# moves it to done/ and writes their time and tokens into its README (plus COST.html when
+# a plan price is configured).
+cp "$KIT_DIR/scripts/record-workstream-session.sh" "$TARGET/.claude/scripts/record-workstream-session.sh"
+cp "$KIT_DIR/scripts/close-workstream.sh"          "$TARGET/.claude/scripts/close-workstream.sh"
+mkdir -p "$TARGET/.claude/scripts/workstream-cost"
+cp "$KIT_DIR"/scripts/workstream-cost/*.py "$KIT_DIR"/scripts/workstream-cost/*.html \
+   "$TARGET/.claude/scripts/workstream-cost/"
 
 # 4. execution spine
 cp "$KIT_DIR/execution/REVIEW_CONTRACT.md" "$TARGET/docs/execution/REVIEW_CONTRACT.md"
@@ -86,6 +94,25 @@ else
   echo "      command: $HOOK_CMD"
 fi
 
+# 6b. settings.json: wire the PostToolUse session recorder (merge, never clobber)
+REC_CMD='bash "$CLAUDE_PROJECT_DIR/.claude/scripts/record-workstream-session.sh"'
+REC_MATCH='Write|Edit|MultiEdit|NotebookEdit|Bash'
+if grep -q "record-workstream-session.sh" "$SETTINGS"; then
+  echo "  • session recorder already wired in settings.json"
+elif command -v jq >/dev/null 2>&1; then
+  TMP="$(mktemp)"
+  jq --arg cmd "$REC_CMD" --arg m "$REC_MATCH" '
+    .hooks //= {} |
+    .hooks.PostToolUse //= [] |
+    .hooks.PostToolUse += [ { matcher: $m, hooks: [ { type: "command", command: $cmd } ] } ]
+  ' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
+  echo "  • session recorder merged into settings.json"
+else
+  echo "  ⚠ jq is unavailable — add this PostToolUse hook by hand:"
+  echo "      matcher: $REC_MATCH"
+  echo "      command: $REC_CMD"
+fi
+
 # 7. preflight: the review stage calls skills this kit does not ship
 # §2c of orchestrate.md spawns these by name. They ride along with Claude Code
 # on most builds, in which case nothing is on disk to find — so this NEVER fails
@@ -120,3 +147,5 @@ fi
 
 echo
 echo "Done. In a Claude Code session rooted at the repo, run:  /orchestrate <workstream-id>"
+echo "When a workstream is approved and merged, close it from your terminal:"
+echo "  ./.claude/scripts/close-workstream.sh <workstream-id>   (moves it to done/ and records time and tokens)"
