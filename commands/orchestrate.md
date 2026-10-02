@@ -16,7 +16,7 @@ Read first: `docs/execution/CLAUDE_ORCHESTRATION_GUIDE.md` (repo rules), `docs/e
 
 Pick the workstream id from `$ARGUMENTS`. Then:
 
-- **If `docs/execution/active/<id>/` exists → RESUME.** Read `README.md` (incl. `## Loop Config`), `WORKBOARD.md`, `ACCEPTANCE_CRITERIA.md`, the last `## Round N` of `RUN_LOG.md`, `DECISIONS.md`, `RISKS_AND_BLOCKERS.md`, and **every `## Round` block of `REVIEW.md`** — not just the last. Replay the `Carried:` lines in order to rebuild the **seen-set**: every `F#` ever raised and its current disposition. Cross-check the total against the last block's `Seen-set:` line; if they disagree, trust the replay and say so in the resume line. Reconstruct: current round number, what's Done/In Progress, the last `VERDICT`, the **open** findings by stable `F#`, the **terminal** ones you must not re-litigate, and any pending `FLAG-HUMAN` pause. **Self-heal:** if `REVIEW.md` is missing, copy it from `docs/execution/templates/REVIEW.template.md`; if `## Loop Config` is absent, use defaults (`round_cap: 5`, `posture: aggressive`, `escalate_to_engineer: off`).
+- **If `docs/execution/active/<id>/` exists → RESUME.** Read `README.md` (incl. `## Loop Config`), `WORKBOARD.md`, `ACCEPTANCE_CRITERIA.md`, the last `## Round N` of `RUN_LOG.md`, `DECISIONS.md`, `RISKS_AND_BLOCKERS.md`, and **every `## Round` block of `REVIEW.md`** — not just the last. Replay the `Carried:` lines in order to rebuild the **seen-set**: every `F#` ever raised and its current disposition. Cross-check the total against the last block's `Seen-set:` line; if they disagree, trust the replay and say so in the resume line. Reconstruct: current round number, what's Done/In Progress, the last `VERDICT`, the **open** findings by stable `F#`, the **terminal** ones you must not re-litigate, and any pending `FLAG-HUMAN` pause. **Self-heal:** if `REVIEW.md` is missing, copy it from `docs/execution/templates/REVIEW.template.md`; if `## Loop Config` is absent, use defaults (`round_cap: 5`, `posture: aggressive`, `escalate_to_engineer: off`, and the model defaults in **Model routing**).
 - **Else → INIT.** Run `./.claude/scripts/init-workstream.sh <id>`, then write `README.md` (objective + `## Loop Config`) and `ACCEPTANCE_CRITERIA.md` from the goal. If the goal is a **vault note path**, record that path in `README.md` so the intent source survives a resume.
 
 State the resolved state back in one line before looping — e.g. `Resuming <id> at round 3; last verdict CONCERNS; seen-set F1–F12 (9 terminal, 3 open: F4, F6, F11).` or `Initialized <id>.`
@@ -34,24 +34,47 @@ State the resolved state back in one line before looping — e.g. `Resuming <id>
 	- The same applies to each git worktree's own `.claude/`, and `git worktree remove` fails while locked. If you create a worktree mid-run, its `.claude/` is not frozen; say so on the card rather than working around it.
 	- "Allow always" on a permission prompt fails, because that grant is written to `.claude/settings.local.json`. Ask the human to choose "Allow once", or to unlock if a permanent grant is genuinely wanted.
 
+## Model routing — every spawn names its model
+
+A subagent spawned without a `model` runs on whatever model the session is on. Left alone, every executor, reviewer and live check runs on the most expensive model in the room, even a one-line rename. So **every Task you spawn passes `model` explicitly**, from this table:
+
+| Spawn | Loop Config key | Default |
+| --- | --- | --- |
+| Planner | `model_planner` | `opus` |
+| Executor, task tier `mechanical` | `model_mechanical` | `sonnet` |
+| Executor, task tier `standard` | `model_standard` | `sonnet` |
+| Executor, task tier `hard` | `model_hard` | `opus` |
+| Live check (2b) | `model_verify` | `sonnet` |
+| `adversarial-reviewer` pass | `model_review` | `opus` |
+| Other review passes (`code-review`, `run`) | `model_review_light` | `sonnet` |
+
+Values are model aliases (`haiku` / `sonnet` / `opus`), which resolve to the current release of each. `inherit` means the session's model, which is the old behavior. A key missing from `## Loop Config` takes its default.
+
+**Rules, applied in this order:**
+
+1. **The task tier comes from the plan.** The planner tags every task `mechanical`, `standard` or `hard` (`planner.md`), and you record it in `WORKBOARD.md`. You may raise a tier when you write the contract, and you log why in `DECISIONS.md`. You never lower one.
+2. **Escalate, don't retry at the same tier.** If a task fails its validation command twice, or a review pass raises a `CRITICAL` against code the task wrote, its fix runs one tier up (`mechanical`/`standard` → `hard`). A task already at `hard` stays there; a third failure is a finding, not a retry.
+3. **A reviewer is never on a cheaper model than the code it reviews.** Passes review the round's whole diff, so if *any* task in the round ran on `model_hard`, **every** pass that round runs on `model_hard`. Only a round whose tasks all ran on cheaper models uses `model_review_light` for the non-adversarial passes. The review gate is what makes cheap executors safe; it does not get cheaper than the work.
+4. **Record what ran.** Write the tier and model into each contract's `## Model` section (`SUBAGENTS/T-xxx.md`, including any escalation and why). Add one line per round to `RUN_LOG.md`, e.g. `Models: T-501 sonnet (standard), T-502 opus (hard, escalated after 2 validation failures); review: all opus (T-502 ran on opus).` A cost review can't tell a cheap model that worked from one that forced a rerun without this line.
+
 ## 1. Plan (read-only, once)
 
-If `WORKBOARD.md` has no real tasks yet, spawn a **planner** (read-only Task) to break the goal into atomic, testable, file-scoped tasks grouped into waves (independent tasks share a wave; dependents go later). The planner **returns** the plan; **you** write it into `WORKBOARD.md` (Queue), derive `ACCEPTANCE_CRITERIA.md`, and seed `RISKS_AND_BLOCKERS.md` with its risks. The planner never writes workstream files.
+If `WORKBOARD.md` has no real tasks yet, spawn a **planner** (read-only Task) to break the goal into atomic, testable, file-scoped tasks grouped into waves (independent tasks share a wave; dependents go later). The planner **returns** the plan, with a tier on every task; **you** write it into `WORKBOARD.md` (Queue, tier in the `Tier` column), derive `ACCEPTANCE_CRITERIA.md`, and seed `RISKS_AND_BLOCKERS.md` with its risks. The planner never writes workstream files.
 
-Spawn the planner by reading `.claude/agents/planner.md` and passing it as the Task prompt (read-only). The goal can be an inline objective **or a vault note path**: if `$ARGUMENTS` or the README objective points at a note under the vault, pass that path so the planner traverses its frontmatter for intent (`context` / `parent`-up-to-initiative / `about`; never `related` / `external`). The input note is primary — traversed notes only bound scope, never widen it.
+Spawn the planner by reading `.claude/agents/planner.md` and passing it as the Task prompt (read-only), with `model` set to `model_planner`. Passing the file as a prompt means any `model:` in its frontmatter is never read; the routing table is the only place a model gets chosen. The goal can be an inline objective **or a vault note path**: if `$ARGUMENTS` or the README objective points at a note under the vault, pass that path so the planner traverses its frontmatter for intent (`context` / `parent`-up-to-initiative / `about`; never `related` / `external`). The input note is primary — traversed notes only bound scope, never widen it.
 
 ## 2. The loop (one round = steps 2a–2f)
 
 Increment the round number. Append a `## Round N — <date>` entry to `RUN_LOG.md` as you go (append-only, factual — no invented dates/test counts).
 
 ### 2a. Execute the current wave
-For each task in the active wave, spawn an **executor** Task with a bounded contract written to `SUBAGENTS/T-xxx.md` (objective · allowed file scope · out-of-scope · constraints/contracts · validation command · return format). Run tasks in parallel **only** when their write scopes are disjoint. Move `WORKBOARD.md` items In Progress → Done as each lands, with an atomic commit per task.
+For each task in the active wave, spawn an **executor** Task with a bounded contract written to `SUBAGENTS/T-xxx.md` (objective · allowed file scope · out-of-scope · constraints/contracts · validation command · return format · model), with `model` set from the task's tier per **Model routing**. A fix routed from 2d is an executor Task too: it takes the tier of the task whose code it fixes, raised one step if the escalation rule fires. Run tasks in parallel **only** when their write scopes are disjoint. Move `WORKBOARD.md` items In Progress → Done as each lands, with an atomic commit per task.
 
 If an executor closes with a **"your call?"** question: **you answer it** — proceed when tests are green and the choice is data-backed; log the answer to `DECISIONS.md`. Only when the question is a product / irreversible / cost / contract / security-posture call does it become a `FLAG-HUMAN` item (see 2d).
 
 ### 2b. Verify — the gates (your eyes, not the PM's)
 - **Coverage gate:** a test must exercise *this* change and pass. No test for the new path is a **fail**, not a pass.
-- **Live reality-check:** run the real thing via the `run` skill against the real endpoint/build (the repo's `CLAUDE_ORCHESTRATION_GUIDE.md` §5 names the exact test + smoke commands).
+- **Live reality-check:** run the real thing via the `run` skill against the real endpoint/build (the repo's `CLAUDE_ORCHESTRATION_GUIDE.md` §5 names the exact test + smoke commands). **Run it in a verify Task** (`model_verify`), not in your own session. The Task returns pass/fail per check, the repro for any failure, and at most one screenshot. Browser clicks and shell output cost tokens on every later call of whatever context they land in. In yours, that is the whole workstream's context. The gate is still yours to judge from what the Task returns.
 - Record both to `TEST_RESULTS.md` (Automated / Manual / Gaps). A failed gate produces findings; it cannot reach a clean exit.
 
 ### 2c. Review — independent personas, depth scaled to blast radius
@@ -63,7 +86,7 @@ First classify the round's diff to set **review depth** — match the rigor to w
 | **Standard** — one subsystem (3–8 files), no guardrail or contract touch | 2 | `adversarial-reviewer` + `code-review` |
 | **Deep** — cross-cutting (8+ files), **or** touches a guardrail / API contract / security surface (any size) | 3 | `adversarial-reviewer` + `run` + `code-review` |
 
-A guardrail / contract / security touch **always forces Deep**, regardless of size. Run the passes **independently** over the round's diff (`git diff`), without sharing findings between them. If a lighter tier surfaces a borderline, `CRITICAL`, or `FLAG-HUMAN` finding, **escalate one tier** (add a pass) before routing — cheap depth where it's safe, full depth where it bites.
+A guardrail / contract / security touch **always forces Deep**, regardless of size. Run the passes **independently** over the round's diff (`git diff`), without sharing findings between them, each on the model **Model routing** rule 3 gives it. If a lighter tier surfaces a borderline, `CRITICAL`, or `FLAG-HUMAN` finding, **escalate one tier** (add a pass) before routing — cheap depth where it's safe, full depth where it bites.
 
 **A review pass's input is the round's diff, and nothing else.** Never hand a pass the seen-set, the `Carried:` lines, or a prior disposition "so it doesn't re-find things." The ledger below lives in normalization, downstream of assessment — that separation is what keeps the passes independent, and independence is the whole basis of the consensus number.
 
@@ -161,6 +184,7 @@ Opening the PR, merging, and relocating the workstream to `done/` are **the PM's
 - **The ledger never reaches a reviewer.** Review passes see the round's diff; the seen-set enters at normalization and the resume replay is read by you, the orchestrator. Feeding prior findings into a pass would trade a cheap re-litigation for a correlated blind spot.
 - **Factual only** — no invented owners, dates, or test counts (guide / workstream conventions).
 - **Bounded delegation** — pass executors only their file scope + contracts + expected output, never the full conversation.
+- **Every spawn names its model** (Model routing). No Task inherits the session's model by omission, and no reviewer runs on a cheaper model than the code it reviews.
 
 ## Per-repo specifics
 

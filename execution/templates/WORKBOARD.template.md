@@ -8,9 +8,9 @@
 
 ## Queue
 
-| Task ID | Owner      | Scope (files/modules) | Priority | Dependency |
-| ------- | ---------- | --------------------- | -------- | ---------- |
-| T-001   | unassigned | n/a                   | P1       | none       |
+| Task ID | Owner      | Scope (files/modules) | Tier     | Priority | Dependency |
+| ------- | ---------- | --------------------- | -------- | -------- | ---------- |
+| T-001   | unassigned | n/a                   | standard | P1       | none       |
 
 ## Blocked
 
