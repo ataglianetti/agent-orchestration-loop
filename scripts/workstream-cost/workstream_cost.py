@@ -6,8 +6,10 @@ dedupes streamed messages, prices every token at Claude API list rates, and
 measures calendar span vs active time. Subagent transcripts are included.
 
 Usage:
-  # At close (close-workstream.sh calls this): price the sessions the hook recorded in
-  # <workstream>/SESSIONS.log and write COST.html + cost.json into the workstream folder.
+  # At close (close-workstream.sh calls this): for the sessions the hook recorded in
+  # <workstream>/SESSIONS.log, write a dollar-free Run record into the workstream README.
+  # With a plan price set (Loop Config plan_price, or $WORKSTREAM_PLAN_PRICE), also write
+  # COST.html + cost.json pricing those tokens at Claude API list rates.
   python3 workstream_cost.py record --repo . --workstream docs/execution/done/my-feature
 
   # By hand: find candidate sessions that mention a workstream, then price a chosen set
@@ -263,7 +265,8 @@ def cmd_analyze(a):
         tpl = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "bill.html")).read()
         with open(a.html, "w") as f:
             f.write(tpl.replace("__TITLE__", a.title).replace("__DATA__", json.dumps(out)))
-    print(summary(out))
+    print(summary(out, dollars=getattr(a, "dollars", True)))
+    return out
 
 
 def _text(path):
@@ -312,7 +315,13 @@ def workstream_facts(ws):
 
 
 def cmd_record(a):
-    """Price the sessions the hook recorded, and write the statement into the workstream."""
+    """Write the Run record (time and tokens, no dollars) into the workstream README for the
+    sessions the hook recorded. Only when a plan price is configured, also write COST.html and
+    cost.json, pricing those tokens at API rates against the plan.
+
+    Plan price, first match wins: --plan-price; plan_price in the README's Loop Config;
+    WORKSTREAM_PLAN_PRICE in the environment (a personal default that needs no per-workstream
+    edit). Plan name follows the same order with plan_name / WORKSTREAM_PLAN_NAME."""
     ws = os.path.abspath(os.path.expanduser(a.workstream))
     log = os.path.join(ws, "SESSIONS.log")
     if not os.path.exists(log):
@@ -326,14 +335,23 @@ def cmd_record(a):
     if not ids:
         sys.exit(f"{log} lists no sessions.")
     title, subtitle, cfg, notes = workstream_facts(ws)
+    price = a.plan_price if a.plan_price is not None else cfg.get("plan_price", os.environ.get("WORKSTREAM_PLAN_PRICE"))
+    name = a.plan_name or cfg.get("plan_name") or os.environ.get("WORKSTREAM_PLAN_NAME") or "subscription"
+    try:
+        price = float(price) if price not in (None, "") else 0.0
+    except ValueError:
+        sys.exit(f"plan_price must be a number, got {price!r}")
+    priced = price > 0
     args = argparse.Namespace(
         repo=a.repo, session=[f"{sid}:Session {i + 1}" for i, sid in enumerate(ids)],
         title=title, subtitle=subtitle, gap=a.gap, note=notes, offline=a.offline,
-        plan_name=cfg.get("plan_name", a.plan_name), plan_price=float(cfg.get("plan_price", a.plan_price)),
-        json=os.path.join(ws, "cost.json"), html=os.path.join(ws, "COST.html"))
-    cmd_analyze(args)
-    write_run_record(ws, json.load(open(args.json)))
-    print(f"Wrote {args.html} and the Run record section of README.md")
+        plan_name=name, plan_price=price, dollars=priced,
+        json=os.path.join(ws, "cost.json") if priced else None,
+        html=os.path.join(ws, "COST.html") if priced else None)
+    out = cmd_analyze(args)
+    write_run_record(ws, out)
+    print("Wrote the Run record section of README.md" + (f", {args.html} and {args.json}" if priced else
+          " (no plan_price set, so no COST.html; see the record subcommand's help)"))
 
 
 def write_run_record(ws, o):
@@ -385,9 +403,9 @@ def hm(s):
     return (f"{d}d " if d else "") + f"{h}h {m:02d}m"
 
 
-def summary(o):
+def summary(o, dollars=True):
     t = o["totals"]
-    out = [f"{o['title']}  —  API cost ${o['total_cost']:,.2f}",
+    out = [o["title"] + (f"  —  API cost ${o['total_cost']:,.2f}" if dollars else ""),
            f"tokens: total {sum(t.values()):,}  output {t['output']:,}  cache reads {t['cache_read']:,}  "
            f"cache writes {t['cache_write_5m'] + t['cache_write_1h']:,}  input {t['input']:,}",
            f"time: calendar {hm(o['calendar_s'])}  active {hm(o['active_s'])} (gaps > {o['active_gap_min']} min = idle)"]
@@ -410,17 +428,19 @@ def main():
     an.add_argument("--title", required=True)
     an.add_argument("--subtitle", default="")
     an.add_argument("--gap", type=float, default=15, help="minutes; longer gaps count as idle")
-    an.add_argument("--plan-name", default="Claude Max")
-    an.add_argument("--plan-price", type=float, default=200)
+    an.add_argument("--plan-name", default="subscription", help="the flat-fee plan the work ran on")
+    an.add_argument("--plan-price", type=float, default=0, help="its monthly price; 0 omits the plan comparison")
     an.add_argument("--note", action="append", help="context line shown on the bill (repeatable)")
     an.add_argument("--json"); an.add_argument("--html")
     an.add_argument("--offline", action="store_true", help="skip the live pricing fetch; use the last cached fetch")
-    rc = sub.add_parser("record", help="price the sessions in <workstream>/SESSIONS.log; write COST.html + cost.json there")
+    rc = sub.add_parser("record", help="write the README Run record for the sessions in <workstream>/SESSIONS.log; "
+                                         "with a plan price, also COST.html + cost.json")
     rc.add_argument("--repo", required=True, help="repo root the sessions ran in")
     rc.add_argument("--workstream", required=True, help="the workstream folder")
     rc.add_argument("--gap", type=float, default=15)
-    rc.add_argument("--plan-name", default="Claude Max", help="overridden by plan_name in the README's Loop Config")
-    rc.add_argument("--plan-price", type=float, default=200, help="overridden by plan_price in the README's Loop Config")
+    rc.add_argument("--plan-name", help="else plan_name in the README's Loop Config, else $WORKSTREAM_PLAN_NAME")
+    rc.add_argument("--plan-price", type=float, help="else plan_price in Loop Config, else $WORKSTREAM_PLAN_PRICE; "
+                                                     "unset or 0 = Run record only, no COST.html")
     rc.add_argument("--offline", action="store_true")
     a = p.parse_args()
     {"find": cmd_find, "analyze": cmd_analyze, "record": cmd_record}[a.cmd](a)

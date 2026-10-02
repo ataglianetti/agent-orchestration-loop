@@ -136,7 +136,7 @@ ${D.notes.length ? `<section><h2>Work performed</h2><ul class="notes">${D.notes.
 <section class="fine"><h2>How this was calculated</h2>
   <p>Token counts come from the Claude Code session logs on the machine that ran the work, including every subagent the sessions launched. Repeated log entries for one response are counted once.</p>
   <p>Rates are Claude API list prices from ${esc(D.pricing_source)}, ${D.pricing_how === "fetched live" ? "fetched live on" : "as of"} ${D.pricing_date}. Each cache write is priced at the 5-minute or 1-hour rate recorded in the log.</p>
-  <p>The API figure is what the same tokens would have cost on a pay-per-token API account. The work ran on a ${esc(D.plan_name)} subscription, so no per-token charge was incurred. The plan has usage limits, and its fee covers everything used that month, not this workstream alone.</p>
+  <p>The API figure is what the same tokens would have cost on a pay-per-token API account.${D.plan_price ? ` The work ran on a ${esc(D.plan_name)} plan, so no per-token charge was incurred. The plan has usage limits, and its fee covers everything used that month, not this workstream alone.` : ""}</p>
   <p>Active time adds up the stretches where log entries are ${D.active_gap_min} minutes apart or less. Longer gaps count as idle. Calendar time runs from the first log entry to the last.</p>
   ${D.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join("")}
 </section>`;

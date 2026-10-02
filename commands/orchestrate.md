@@ -170,7 +170,7 @@ No exceptions — not when everything looks done, not when the answer seems obvi
 - **Never rule on a `FLAG-HUMAN`** (see 2d), even one that looks already-decided.
 - **Never open a PR, request review, or merge.** Outward-facing and human-only.
 
-Opening the PR, merging, and relocating the workstream to `done/` are **the PM's to perform** after approving — by hand, or by explicitly asking in a new instruction. `/orchestrate` does not auto-detect an approval and proceed. The relocation is `./.claude/scripts/close-workstream.sh <id>`: it moves the folder and writes the cost record (`COST.html`, `cost.json`) into it. The loop never runs it.
+Opening the PR, merging, and relocating the workstream to `done/` are **the PM's to perform** after approving — by hand, or by explicitly asking in a new instruction. `/orchestrate` does not auto-detect an approval and proceed. The relocation is `./.claude/scripts/close-workstream.sh <id>`: it moves the folder and writes the run record into it: a `## Run record` section in the README (time and tokens), plus `COST.html` when a plan price is configured. The loop never runs it.
 
 ---
 
@@ -184,7 +184,7 @@ Opening the PR, merging, and relocating the workstream to `done/` are **the PM's
 - **The ledger never reaches a reviewer.** Review passes see the round's diff; the seen-set enters at normalization and the resume replay is read by you, the orchestrator. Feeding prior findings into a pass would trade a cheap re-litigation for a correlated blind spot.
 - **Factual only** — no invented owners, dates, or test counts (guide / workstream conventions).
 - **Bounded delegation** — pass executors only their file scope + contracts + expected output, never the full conversation.
-- **`SESSIONS.log` belongs to the hook.** `record-workstream-session.sh` appends each session that writes to the workstream; the cost record prices exactly that list. Never edit, rewrite or delete it.
+- **`SESSIONS.log` belongs to the hook.** `record-workstream-session.sh` appends each session that writes to the workstream; the run record covers exactly that list. Never edit, rewrite or delete it.
 - **Every spawn names its model** (Model routing). No Task inherits the session's model by omission, and no reviewer runs on a cheaper model than the code it reviews.
 
 ## Per-repo specifics

@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Close a workstream: move it from docs/execution/active/<id>/ to docs/execution/done/<id>/
-# and write its cost record (COST.html + cost.json) into the folder it lands in.
+# and write its run record into the folder it lands in.
 #
 # Usage: ./.claude/scripts/close-workstream.sh <workstream-id> [--no-cost]
 #
 # This is the PM's step, run after approving and merging. orchestrate.md never runs it: moving
-# a workstream to done/ is human-only. The cost record prices the sessions listed in
-# SESSIONS.log (written by the record-workstream-session hook) at live Claude API list prices,
-# so run it soon after the work ends: Claude Code can delete old session transcripts.
+# a workstream to done/ is human-only. The run record covers the sessions listed in
+# SESSIONS.log (written by the record-workstream-session hook):
+#   - always: a "## Run record" section in the README, with time and tokens and no dollars
+#   - with a plan price set (Loop Config plan_price, or $WORKSTREAM_PLAN_PRICE): also COST.html
+#     and cost.json, pricing those tokens at live Claude API list prices against the plan
+# Run it soon after the work ends: Claude Code can delete old session transcripts.
 #
 # If the cost step fails, the move still stands and the script prints the command to retry.
 set -euo pipefail
@@ -27,7 +30,7 @@ COST="$ROOT_DIR/.claude/scripts/workstream-cost/workstream_cost.py"
 if [ ! -d "$SRC" ]; then
   if [ -d "$DST" ]; then
     echo "Already closed: $DST"
-    echo "To (re)write its cost record: python3 \"$COST\" record --repo \"$ROOT_DIR\" --workstream \"$DST\""
+    echo "To (re)write its run record: python3 \"$COST\" record --repo \"$ROOT_DIR\" --workstream \"$DST\""
   else
     echo "No workstream at $SRC"
   fi
@@ -50,14 +53,14 @@ fi
 
 retry="python3 \"$COST\" record --repo \"$ROOT_DIR\" --workstream \"$DST\""
 if [ ! -f "$DST/SESSIONS.log" ]; then
-  echo "No SESSIONS.log, so no cost record: this workstream predates the session hook, or the hook isn't wired."
-  echo "Price it by hand with: python3 \"$COST\" find --repo \"$ROOT_DIR\" --text $ID   (then: analyze)"
+  echo "No SESSIONS.log, so no run record: this workstream predates the session hook, or the hook isn't wired."
+  echo "Find its sessions by hand with: python3 \"$COST\" find --repo \"$ROOT_DIR\" --text $ID   (then: analyze)"
   exit 0
 fi
 if ! command -v python3 >/dev/null 2>&1 || [ ! -f "$COST" ]; then
-  echo "Cost record skipped: python3 or $COST is missing. Retry with: $retry"
+  echo "Run record skipped: python3 or $COST is missing. Retry with: $retry"
   exit 0
 fi
 if ! python3 "$COST" record --repo "$ROOT_DIR" --workstream "$DST"; then
-  echo "Cost record failed (the workstream is still closed). Retry with: $retry"
+  echo "Run record failed (the workstream is still closed). Retry with: $retry"
 fi

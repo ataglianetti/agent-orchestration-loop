@@ -33,8 +33,9 @@ cp "$KIT_DIR/scripts/loop-gate.zsh"                "$TARGET/.claude/scripts/loop
 cp "$KIT_DIR/scripts/lock-loop.sh"                 "$TARGET/.claude/scripts/lock-loop.sh"
 cp "$KIT_DIR/scripts/unlock-loop.sh"               "$TARGET/.claude/scripts/unlock-loop.sh"
 cp "$KIT_DIR/scripts/loop-status.sh"               "$TARGET/.claude/scripts/loop-status.sh"
-# Cost record: the hook notes which sessions worked each workstream; the PM's close step
-# moves it to done/ and prices those sessions into COST.html.
+# Run record: the hook notes which sessions worked each workstream; the PM's close step
+# moves it to done/ and writes their time and tokens into its README (plus COST.html when
+# a plan price is configured).
 cp "$KIT_DIR/scripts/record-workstream-session.sh" "$TARGET/.claude/scripts/record-workstream-session.sh"
 cp "$KIT_DIR/scripts/close-workstream.sh"          "$TARGET/.claude/scripts/close-workstream.sh"
 mkdir -p "$TARGET/.claude/scripts/workstream-cost"
@@ -147,4 +148,4 @@ fi
 echo
 echo "Done. In a Claude Code session rooted at the repo, run:  /orchestrate <workstream-id>"
 echo "When a workstream is approved and merged, close it from your terminal:"
-echo "  ./.claude/scripts/close-workstream.sh <workstream-id>   (moves it to done/ and writes COST.html)"
+echo "  ./.claude/scripts/close-workstream.sh <workstream-id>   (moves it to done/ and records time and tokens)"
