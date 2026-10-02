@@ -332,7 +332,41 @@ def cmd_record(a):
         plan_name=cfg.get("plan_name", a.plan_name), plan_price=float(cfg.get("plan_price", a.plan_price)),
         json=os.path.join(ws, "cost.json"), html=os.path.join(ws, "COST.html"))
     cmd_analyze(args)
-    print(f"Wrote {args.html}")
+    write_run_record(ws, json.load(open(args.json)))
+    print(f"Wrote {args.html} and the Run record section of README.md")
+
+
+def write_run_record(ws, o):
+    """Dollar-free summary in the workstream README: time and tokens are facts; the dollar
+    figure is a counterfactual that needs COST.html's fine print, so it stays there."""
+    t = o["totals"]
+    total, fresh = sum(t.values()), sum(t.values()) - t["cache_read"]
+    start = min(s["start"] for s in o["sessions"]); end = max(s["end"] for s in o["sessions"])
+    fmt = lambda iso: parse_ts(iso).strftime("%b %-d, %H:%M")
+    big = lambda n: f"{n / 1e9:.2f}B" if n >= 1e9 else f"{n / 1e6:.1f}M"
+    models = collections.Counter()
+    for s in o["sessions"]:
+        models.update(s.get("models", {}))
+    lines = [
+        "## Run record", "",
+        "<!-- Written by close-workstream.sh from SESSIONS.log; rewritten on every re-run. API-rate dollars: COST.html. -->", "",
+        f"- **Calendar:** {hm(o['calendar_s'])} ({fmt(start)} → {fmt(end)})",
+        f"- **Active:** {hm(o['active_s'])} (log gaps of {o['active_gap_min']:g} min or less; longer gaps count as idle)",
+        f"- **Sessions:** {len(o['sessions'])}, which launched {sum(s['subagents'] for s in o['sessions'])} subagents; "
+        f"{sum(s['human_messages'] for s in o['sessions'])} messages from you",
+        f"- **Tokens:** {big(total)} total, {big(fresh)} newly processed ({big(t['output'])} output); "
+        f"the rest are cache reads of context already sent",
+        "- **Models (by tokens):** " + ", ".join(f"{m} {v / max(1, sum(models.values())):.0%}" for m, v in models.most_common()),
+    ] + [f"- {n}" for n in o.get("notes", [])] + [f"- **Warning:** {w}" for w in o.get("warnings", [])] + [""]
+    path = os.path.join(ws, "README.md")
+    readme = _text(path)
+    section = "\n".join(lines)
+    if re.search(r"^## Run record\s*$", readme, re.M):  # replace the old section, up to the next H2
+        readme = re.sub(r"^## Run record\s*$.*?(?=^## |\Z)", section + "\n", readme, flags=re.M | re.S)
+    else:
+        readme = readme.rstrip("\n") + "\n\n" + section
+    with open(path, "w") as f:
+        f.write(readme)
 
 
 def cost_of(models):

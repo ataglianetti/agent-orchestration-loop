@@ -101,6 +101,26 @@ OUT=$(HOME="$T/home" bash "$R/.claude/scripts/close-workstream.sh" feat-c 2>&1);
 printf '%s' "$OUT" | grep -q "Retry with"; check "a failed cost step prints the retry command" $?
 [ ! -f "$R/docs/execution/done/feat-c/COST.html" ]; check "writes no COST.html when nothing could be priced" $?
 
+echo "== README run record =="
+WS="$T/rr"; mkdir -p "$WS"
+printf '# Workstream: rr\n\n## Objective\n\nShip it.\n\n## Loop Config\n\n- round_cap: 5\n' > "$WS/README.md"
+rr() { python3 - "$KIT/scripts/workstream-cost" "$WS" "$1" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import workstream_cost as w
+o = {"totals": {"input": 1, "cache_write_5m": 2, "cache_write_1h": 3, "cache_read": 4_000_000, "output": int(sys.argv[3])},
+     "sessions": [{"start": "2026-01-01T10:00:00+00:00", "end": "2026-01-02T10:00:00+00:00", "subagents": 3,
+                   "human_messages": 5, "models": {"Opus 5": 10}}],
+     "calendar_s": 86400, "active_s": 3600, "active_gap_min": 15, "notes": ["3 loop rounds (RUN_LOG.md)."], "warnings": []}
+w.write_run_record(sys.argv[2], o)
+PY
+}
+rr 500000
+grep -q "^## Run record" "$WS/README.md" && grep -q "Ship it." "$WS/README.md" && grep -q "round_cap: 5" "$WS/README.md"
+check "appends a Run record section and keeps the rest of the README" $?
+! grep -q '\$' "$WS/README.md"; check "the README record carries no dollar figures" $?
+rr 900000
+[ "$(grep -c '^## Run record' "$WS/README.md")" -eq 1 ] && grep -q "(0.9M output)" "$WS/README.md"
+check "a re-run replaces the section instead of adding a second one" $?
+
 echo
 echo "passed: $PASS   failed: $FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
