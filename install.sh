@@ -53,10 +53,20 @@ else
   echo "  • guide already exists — left as-is"
 fi
 
-# 5. .gitignore: ensure the run marker is ignored
+# 5. .gitignore: ensure the run marker and per-machine run data are ignored
 GI="$TARGET/.gitignore"
 if ! grep -qxF ".loop-active" "$GI" 2>/dev/null; then
   printf '\n# agent orchestration loop run marker\n.loop-active\n' >> "$GI"
+fi
+# Repos that commit docs/execution/ would otherwise commit these: SESSIONS.log holds local
+# session IDs and absolute paths, and COST.html / cost.json are a personal cost comparison.
+# The dollar-free Run record in each workstream README stays tracked.
+missing=""
+for pat in "docs/execution/**/SESSIONS.log" "docs/execution/**/COST.html" "docs/execution/**/cost.json"; do
+  grep -qxF "$pat" "$GI" 2>/dev/null || missing="$missing$pat\n"
+done
+if [ -n "$missing" ]; then
+  printf '\n# agent orchestration loop per-machine run data\n%b' "$missing" >> "$GI"
 fi
 
 # 6. settings.json: wire the PreToolUse(Bash) guard hook (merge, never clobber)
