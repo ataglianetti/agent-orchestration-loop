@@ -1,0 +1,111 @@
+<title>__TITLE__ Efficiency Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: companion sheet to the statement — headline delta, scenario chart, ranked levers, then where the money went. */
+:root {
+  --paper: #ffffff; --ground: #eef0f3; --ink: #151a21; --muted: #5b6472; --rule: #d9dde3;
+  --ledger: #1d5fb8; --save: #23774f; --bar: #c9d5e6; --keep: #6b5a1e;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --f-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #171b21; --ground: #0d1014; --ink: #e5e8ec; --muted: #9aa3af; --rule: #2b313a;
+  --ledger: #78a7ec; --save: #5fc394; --bar: #2c3a4f; --keep: #d8bf6a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --paper: #171b21; --ground: #0d1014; --ink: #e5e8ec; --muted: #9aa3af; --rule: #2b313a;
+  --ledger: #78a7ec; --save: #5fc394; --bar: #2c3a4f; --keep: #d8bf6a; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--ground); color: var(--ink); font: 15px/1.55 var(--f-body); padding-inline: 16px; padding-block: 32px 48px }
+.sheet { max-width: 880px; margin: 0 auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: clamp(20px, 4vw, 48px); display: grid; gap: 36px }
+.num { font-family: var(--f-num); font-variant-numeric: tabular-nums }
+h1, h2, h3 { font-family: var(--f-head); font-weight: 600; margin: 0; text-wrap: balance }
+h1 { font-size: clamp(26px, 4vw, 34px); line-height: 1.15 }
+h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding-bottom: 8px; border-bottom: 1px solid var(--rule); margin-bottom: 4px }
+h3 { font-size: 19px }
+.eyebrow { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ledger); font-weight: 600 }
+.sub { color: var(--muted); margin-top: 6px; max-width: 60ch }
+.headline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px; font-family: var(--f-num) }
+.headline .from { font-size: clamp(22px, 3.4vw, 28px); color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px }
+.headline .to { font-size: clamp(30px, 5vw, 42px); color: var(--save); font-weight: 500 }
+.headline .pct { font-size: 15px; color: var(--save) }
+.chart { display: grid; gap: 10px }
+.crow { display: grid; grid-template-columns: minmax(150px, 300px) 1fr; gap: 4px 14px; align-items: center }
+@media (max-width: 600px) { .crow { grid-template-columns: 1fr } }
+.crow .name { font-size: 14px; min-width: 0 }
+.track { position: relative; height: 26px; min-width: 0 }
+.track .fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 2px }
+.track .fill.base { background: var(--ledger) } .track .fill.best { background: var(--save) }
+.track .val { position: absolute; top: 50%; transform: translateY(-50%); font-size: 13px; white-space: nowrap; padding-left: 8px }
+.levers { display: grid; gap: 14px; counter-reset: lever }
+.lever { border: 1px solid var(--rule); border-radius: 4px; padding: 18px 20px; display: grid; gap: 10px }
+.lever header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; align-items: baseline }
+.lever h3::before { counter-increment: lever; content: counter(lever) ". "; color: var(--muted) }
+.lever .saves { font-family: var(--f-num); color: var(--save); font-size: 15px; white-space: nowrap }
+.lever dl { margin: 0; display: grid; grid-template-columns: 90px 1fr; gap: 6px 14px; font-size: 14px }
+@media (max-width: 520px) { .lever dl { grid-template-columns: 1fr } }
+.lever dt { color: var(--muted); font-size: 12.5px; padding-top: 2px } .lever dd { margin: 0; max-width: 68ch }
+.lever.keep { border-style: dashed } .lever.keep .saves { color: var(--keep) } .lever.keep h3::before { content: "" }
+.scroll { overflow-x: auto }
+table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 520px }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12.5px; padding: 8px 10px 8px 0 }
+td { padding: 7px 10px 7px 0; border-top: 1px solid var(--rule) }
+td.r, th.r { text-align: right; padding-right: 0 }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px }
+.stat { border-top: 2px solid var(--ink); padding-top: 8px } .stat b { display: block; font: 500 22px var(--f-num) } .stat span { font-size: 12.5px; color: var(--muted) }
+.fine { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; max-width: 78ch } .fine p { margin: 0 }
+</style>
+
+<main class="sheet" id="sheet"></main>
+
+<script>
+const D = __DATA__;
+const $ = (n, d = 0) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const K = n => Math.round(n / 1000).toLocaleString("en-US") + "K";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const best = D.scenarios.reduce((a, b) => b.cost < a.cost ? b : a);
+const max = Math.max(...D.scenarios.map(s => s.cost));
+
+const chart = D.scenarios.map(s => {
+  const w = s.cost / max * 82, cls = s.name === "As run" ? "base" : s === best ? "best" : "";
+  return `<div class="crow"><div class="name">${esc(s.name)}</div><div class="track" role="img" aria-label="${esc(s.name)} ${$(s.cost)}">
+    <div class="fill ${cls}" style="width:${w.toFixed(1)}%"></div><span class="val num" style="left:${w.toFixed(1)}%">${$(s.cost)}${s.name === "As run" ? "" : ` · ${Math.round((s.cost - D.as_run) / D.as_run * 100)}%`}</span></div></div>`;
+}).join("");
+
+const levers = D.recommendations.map(r => `<article class="lever"><header><h3>${esc(r.lever)}</h3><span class="saves">saves ~${$(r.saves)}</span></header>
+  <dl><dt>What we saw</dt><dd>${esc(r.evidence)}</dd><dt>Change</dt><dd>${esc(r.how)}</dd><dt>Watch for</dt><dd>${esc(r.risk)}</dd></dl></article>`).join("")
+  + `<article class="lever keep"><header><h3>${esc(D.keep.lever)}</h3><span class="saves">costs ${$(D.keep.cost)}</span></header><dl><dt>Why</dt><dd>${esc(D.keep.evidence)}</dd></dl></article>`;
+
+const roleRows = [], toolRows = [];
+for (const s of D.sessions) {
+  for (const [role, v] of Object.entries(s.roles).sort((a, b) => b[1].cost - a[1].cost))
+    roleRows.push(`<tr><td>${esc(s.label)}</td><td>${esc(role)}</td><td class="r num">${v.actors}</td><td class="r num">${v.calls.toLocaleString()}</td><td>${esc(Object.entries(v.models).map(([m, n]) => `${m} ${n}`).join(", "))}</td><td class="r num">${$(v.cost, 2)}</td></tr>`);
+  for (const [tool, v] of Object.entries(s.by_tool))
+    toolRows.push(`<tr><td>${esc(s.label)}</td><td>${esc(tool)}</td><td class="r num">${v.calls.toLocaleString()}</td><td class="r num">${$(v.cost / v.calls, 2)}</td><td class="r num">${$(v.cost, 2)}</td></tr>`);
+}
+const stats = D.sessions.map(s => `<div class="stat"><b>${K(s.context.median)}</b><span>${esc(s.label)}: median orchestrator context (peak ${K(s.context.max)}, started at ${K(s.context.start)})</span></div>`).join("");
+
+document.getElementById("sheet").innerHTML = `
+<header><div class="eyebrow">Efficiency review · API-rate cost</div><h1>${esc(D.title)}</h1>
+  <p class="sub">Where the tokens went, and what running the same workstream differently would have cost at Claude API list prices. On the subscription none of this was billed per token. This is preparation for a day when it might be.</p></header>
+
+<section><div class="headline"><span class="from">${$(D.as_run)}</span><span class="to">${$(best.cost)}</span><span class="pct">${Math.round((best.cost - D.as_run) / D.as_run * 100)}% · ${esc(best.name)}</span></div></section>
+
+<section><h2>Same work, priced five ways</h2><div class="chart">${chart}</div></section>
+
+<section><h2>What to change, largest saving first</h2><div class="levers">${levers}</div></section>
+
+<section><h2>Where the money went</h2>
+  <div class="stats">${stats}</div>
+  <div class="scroll" style="margin-top:18px"><table><thead><tr><th>Session</th><th>Role</th><th class="r">Agents</th><th class="r">Calls</th><th>Models (calls)</th><th class="r">Cost</th></tr></thead><tbody>${roleRows.join("")}</tbody></table></div>
+  <div class="scroll" style="margin-top:22px"><table><thead><tr><th>Session</th><th>Orchestrator calls that used</th><th class="r">Calls</th><th class="r">Avg / call</th><th class="r">Cost</th></tr></thead><tbody>${toolRows.join("")}</tbody></table></div>
+</section>
+
+<section class="fine"><h2>How this was calculated</h2>
+  <p>Every API response in the session logs, including subagents, priced at list rates from ${esc(D.pricing_source)}, ${D.pricing_how === "fetched live" ? "fetched live on" : "as of"} ${D.pricing_date}.${D.pricing_warning ? ` <strong>${esc(D.pricing_warning)}</strong>` : ""} A call's cost is attributed to the tools it requested. Most of that cost is re-reading the context the call carried, not the tool itself.</p>
+  <p>Scenarios re-price the same token flow. A model swap assumes the same number of calls and tokens; a different model would behave differently, so treat it as a rate comparison, not a forecast. The context cap trims cache reads above ${K(D.cap)} on orchestrator calls. It does not price the extra file re-reads a fresh session would make.</p>
+  <p>Levers overlap: the context cap and moving work out of the orchestrator save the same dollars by different means. Quote the combined scenario, not a sum of the levers.</p>
+</section>`;
+</script>

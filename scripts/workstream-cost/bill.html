@@ -1,0 +1,143 @@
+<title>__TITLE__ Statement</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/* Layout: a single itemized statement sheet — header, amount due, line items, usage by session, time, fine print. */
+:root {
+  --paper: #ffffff; --ground: #eef0f3; --ink: #151a21; --muted: #5b6472; --rule: #d9dde3;
+  --ledger: #1d5fb8; --paid: #23774f; --bar: #c9d5e6;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-head: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif;
+  --f-num: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --paper: #171b21; --ground: #0d1014; --ink: #e5e8ec; --muted: #9aa3af; --rule: #2b313a;
+  --ledger: #78a7ec; --paid: #5fc394; --bar: #2c3a4f; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --paper: #171b21; --ground: #0d1014; --ink: #e5e8ec; --muted: #9aa3af; --rule: #2b313a;
+  --ledger: #78a7ec; --paid: #5fc394; --bar: #2c3a4f; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--ground); color: var(--ink); font: 15px/1.55 var(--f-body); padding-inline: 16px; padding-block: 32px 48px }
+.sheet { max-width: 880px; margin: 0 auto; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: clamp(20px, 4vw, 48px); display: grid; gap: 36px }
+.num { font-family: var(--f-num); font-variant-numeric: tabular-nums }
+h1, h2 { font-family: var(--f-head); font-weight: 600; margin: 0; text-wrap: balance }
+h1 { font-size: clamp(26px, 4vw, 34px); line-height: 1.15 }
+h2 { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; padding-bottom: 8px; border-bottom: 1px solid var(--rule); margin-bottom: 4px }
+.eyebrow { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--ledger); font-weight: 600 }
+.head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 20px }
+.head .sub { color: var(--muted); margin-top: 6px; max-width: 52ch }
+.meta { display: grid; grid-template-columns: auto auto; gap: 2px 16px; font-size: 13px; align-self: start }
+.meta dt { color: var(--muted) } .meta dd { margin: 0 }
+.due { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border: 1px solid var(--rule); border-radius: 4px }
+.due > div { padding: 18px 20px; display: grid; gap: 4px; min-width: 0 }
+.due > div + div { border-left: 1px solid var(--rule) }
+@media (max-width: 640px) { .due > div + div { border-left: 0; border-top: 1px solid var(--rule) } }
+.due .label { font-size: 13px; color: var(--muted) }
+.due .amt { font-family: var(--f-num); font-size: clamp(26px, 4vw, 34px); font-weight: 500; line-height: 1.1 }
+.due .api .amt { color: var(--ledger) } .due .plan .amt { color: var(--paid) }
+.due .note { font-size: 12.5px; color: var(--muted) }
+.scroll { overflow-x: auto }
+table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 560px }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12.5px; padding: 8px 10px 8px 0 }
+td { padding: 7px 10px 7px 0; border-top: 1px solid var(--rule); vertical-align: top }
+td.r, th.r { text-align: right; padding-right: 0 }
+tr.group td { border-top: 1px solid var(--ink); font-weight: 600; padding-top: 14px }
+tr.sub td { color: var(--muted); font-size: 13px }
+tr.total td { border-top: 2px solid var(--ink); font-weight: 600; font-size: 15px; padding-top: 12px }
+.time { display: grid; gap: 18px }
+.trow { display: grid; grid-template-columns: minmax(120px, 190px) 1fr; gap: 6px 16px; align-items: center }
+@media (max-width: 560px) { .trow { grid-template-columns: 1fr } }
+.trow .lbl { font-weight: 500 } .trow .lbl small { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px }
+.track { position: relative; height: 22px; background: var(--bar); border-radius: 2px; min-width: 0 }
+.track .fill { position: absolute; inset: 0 auto 0 0; background: var(--ledger); border-radius: 2px }
+.track + .cap { font-size: 12.5px; color: var(--muted); margin-top: 4px }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12.5px; color: var(--muted) }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px }
+ul.notes { margin: 0; padding-left: 18px; display: grid; gap: 6px; max-width: 70ch }
+.fine { font-size: 12.5px; color: var(--muted); display: grid; gap: 6px; max-width: 78ch }
+.fine p { margin: 0 }
+.warn { color: #b4471e }
+</style>
+
+<main class="sheet" id="sheet"></main>
+
+<script>
+const D = __DATA__;
+const $ = (n, d = 2) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const N = n => n.toLocaleString("en-US");
+const M = n => (n / 1e6).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + "M";
+const HM = s => { let m = Math.round(s / 60), h = Math.floor(m / 60); m %= 60; const d = Math.floor(h / 24); h %= 24;
+  return (d ? d + "d " : "") + h + "h " + String(m).padStart(2, "0") + "m"; };
+const DT = iso => new Date(iso).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const totalTok = Object.values(D.totals).reduce((a, b) => a + b, 0);
+const freshTok = totalTok - D.totals.cache_read;
+const start = D.sessions.map(s => s.start).sort()[0], end = D.sessions.map(s => s.end).sort().at(-1);
+const ratio = D.plan_price ? D.total_cost / D.plan_price : null;
+
+const models = [...new Set(D.lines.map(l => l.model))];
+let rows = "";
+for (const m of models) {
+  const ls = D.lines.filter(l => l.model === m && l.tokens > 0);
+  const sub = ls.reduce((a, l) => a + l.amount, 0), subTok = ls.reduce((a, l) => a + l.tokens, 0);
+  rows += `<tr class="group"><td colspan="4">${esc(ls[0].model_name)}</td><td class="r num">${$(sub)}</td></tr>`;
+  for (const l of ls) rows += `<tr><td>${esc(l.type_label)}</td><td class="r num">${N(l.tokens)}</td><td class="r num">${$(l.rate, 2)} / MTok</td><td></td><td class="r num">${$(l.amount)}</td></tr>`;
+  rows += `<tr class="sub"><td>${esc(ls[0].model_name)} tokens</td><td class="r num">${N(subTok)}</td><td colspan="3"></td></tr>`;
+}
+rows += `<tr class="total"><td>Total at API list price</td><td class="r num">${N(totalTok)}</td><td colspan="2"></td><td class="r num">${$(D.total_cost)}</td></tr>`;
+
+const sess = D.sessions.map(s => `<tr><td>${esc(s.label)}<br><small style="color:var(--muted)">${DT(s.start)} → ${DT(s.end)}</small></td>
+  <td class="r num">${HM(s.calendar_s)}</td><td class="r num">${HM(s.active_s)}</td><td class="r num">${s.subagents}</td>
+  <td class="r num">${M(Object.values(s.tokens).reduce((a, b) => a + b, 0))}</td><td class="r num">${$(s.cost)}</td></tr>`).join("");
+
+const bar = (label, sub, cal, act) => `<div><div class="trow"><div class="lbl">${esc(label)}<small>${sub}</small></div>
+  <div class="track" role="img" aria-label="${HM(act)} active of ${HM(cal)} calendar"><div class="fill" style="width:${(act / cal * 100).toFixed(1)}%"></div></div></div>
+  <div class="trow"><div></div><div class="cap num">${HM(act)} active · ${HM(cal)} on the calendar · ${Math.round(act / cal * 100)}% active</div></div></div>`;
+
+document.getElementById("sheet").innerHTML = `
+<header class="head">
+  <div><div class="eyebrow">Statement · Claude Code usage</div><h1>${esc(D.title)}</h1>
+    <div class="sub">${esc(D.subtitle || "")}</div></div>
+  <dl class="meta">
+    <dt>Repository</dt><dd>${esc(D.repo)}</dd>
+    <dt>Period</dt><dd>${new Date(start).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(end).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</dd>
+    <dt>Sessions</dt><dd>${D.sessions.length}</dd>
+    <dt>Issued</dt><dd>${D.generated}</dd>
+  </dl>
+</header>
+
+<section class="due">
+  <div class="api"><span class="label">Billed at Claude API rates</span><span class="amt">${$(D.total_cost)}</span>
+    <span class="note">${M(totalTok)} tokens, ${M(freshTok)} of them newly processed</span></div>
+  ${D.plan_price ? `<div class="plan"><span class="label">Paid on ${esc(D.plan_name)}</span><span class="amt">${$(D.plan_price, 0)}<span style="font-size:.5em">/mo</span></span>
+    <span class="note">Flat fee covering all usage that month</span></div>
+  <div><span class="label">API cost vs one month of the plan</span><span class="amt">${ratio.toFixed(1)}×</span>
+    <span class="note">This workstream alone, at list price</span></div>` : ""}
+</section>
+
+<section><h2>Line items</h2><div class="scroll"><table>
+  <thead><tr><th>Item</th><th class="r">Tokens</th><th class="r">Rate</th><th></th><th class="r">Amount</th></tr></thead>
+  <tbody>${rows}</tbody></table></div></section>
+
+<section><h2>Usage by session</h2><div class="scroll"><table>
+  <thead><tr><th>Session</th><th class="r">Calendar</th><th class="r">Active</th><th class="r">Subagents</th><th class="r">Tokens</th><th class="r">API cost</th></tr></thead>
+  <tbody>${sess}</tbody></table></div></section>
+
+<section class="time"><h2>Time: active work vs calendar</h2>
+  <div class="legend"><span><i style="background:var(--ledger)"></i>Active (Claude working or you responding)</span><span><i style="background:var(--bar)"></i>Idle (overnight, waiting on a decision)</span></div>
+  ${bar("Whole workstream", "first message to last", D.calendar_s, D.active_s)}
+  ${D.sessions.map(s => bar(s.label, `${s.human_messages} messages from you`, s.calendar_s, s.active_s)).join("")}
+</section>
+
+${D.notes.length ? `<section><h2>Work performed</h2><ul class="notes">${D.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></section>` : ""}
+
+<section class="fine"><h2>How this was calculated</h2>
+  <p>Token counts come from the Claude Code session logs on the machine that ran the work, including every subagent the sessions launched. Repeated log entries for one response are counted once.</p>
+  <p>Rates are Claude API list prices from ${esc(D.pricing_source)}, ${D.pricing_how === "fetched live" ? "fetched live on" : "as of"} ${D.pricing_date}. Each cache write is priced at the 5-minute or 1-hour rate recorded in the log.</p>
+  <p>The API figure is what the same tokens would have cost on a pay-per-token API account. The work ran on a ${esc(D.plan_name)} subscription, so no per-token charge was incurred. The plan has usage limits, and its fee covers everything used that month, not this workstream alone.</p>
+  <p>Active time adds up the stretches where log entries are ${D.active_gap_min} minutes apart or less. Longer gaps count as idle. Calendar time runs from the first log entry to the last.</p>
+  ${D.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join("")}
+</section>`;
+</script>
