@@ -21,20 +21,28 @@ check() { # $1 = label, $2 = condition result (0 = pass)
 setup() {
   rm -rf "$R"
   mkdir -p "$R/docs/execution/active/feat-a" "$R/docs/execution/active/feat-b" "$R/src" "$R/.claude/scripts/workstream-cost"
-  cp "$KIT/scripts/close-workstream.sh" "$R/.claude/scripts/"
-  cp "$KIT"/scripts/workstream-cost/*.py "$KIT"/scripts/workstream-cost/*.html "$R/.claude/scripts/workstream-cost/"
+  git init -q "$R"
+  cp -p "$KIT/scripts/close-workstream.sh" "$R/.claude/scripts/"
+  cp -p "$KIT"/scripts/workstream-cost/*.py "$KIT"/scripts/workstream-cost/*.html "$R/.claude/scripts/workstream-cost/"
 }
-hook() { # $1 = session id, $2 = JSON tool_input body; returns the hook's exit code
+hook() { # $1 = session id, $2 = JSON tool_input body, $3 = project dir (default $R); returns the hook's exit code
+  local root="${3:-$R}"
   printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Edit","tool_input":{%s}}' \
-    "$1" "$R" "$2" | CLAUDE_PROJECT_DIR="$R" bash "$HOOK" >/dev/null 2>&1
+    "$1" "$root" "$2" | CLAUDE_PROJECT_DIR="$root" bash "$HOOK" >/dev/null 2>&1
 }
-LOG_A="$R/docs/execution/active/feat-a/SESSIONS.log"
+LOG_A="$R/.git/loop-sessions/feat-a.log"
+
+echo "== file modes =="
+for s in close-workstream.sh record-workstream-session.sh workstream-cost/workstream_cost.py; do
+  [ -x "$KIT/scripts/$s" ]; check "$s is executable in the kit" $?
+done
 
 echo "== record-workstream-session.sh =="
 setup
 hook "aaaa1111-0000" "\"file_path\":\"$R/docs/execution/active/feat-a/RUN_LOG.md\""
 check "hook exits 0 on a workstream write" $?
-grep -q "^aaaa1111-0000	" "$LOG_A"; check "records the session on a write inside the workstream" $?
+grep -q "^aaaa1111-0000	" "$LOG_A"; check "records the session in .git/loop-sessions/<id>.log" $?
+[ ! -e "$R/docs/execution/active/feat-a/SESSIONS.log" ]; check "writes nothing into the workstream folder in a git repo" $?
 
 hook "aaaa1111-0000" "\"file_path\":\"$R/docs/execution/active/feat-a/WORKBOARD.md\""
 [ "$(grep -c . "$LOG_A")" -eq 1 ]; check "records each session once, however many writes" $?
@@ -43,16 +51,16 @@ hook "bbbb2222-0000" "\"file_path\":\"$R/docs/execution/active/feat-a/REVIEW.md\
 [ "$(grep -c . "$LOG_A")" -eq 2 ]; check "a second session gets its own line" $?
 
 hook "cccc3333-0000" "\"file_path\":\"$R/src/app.ts\""
-! grep -rqs "cccc3333" "$R/docs/execution/active"; check "a write outside any workstream records nothing" $?
+! grep -rqs "cccc3333" "$R/.git/loop-sessions" "$R/docs"; check "a write outside any workstream records nothing" $?
 
 hook "dddd4444-0000" "\"file_path\":\"docs/execution/active/feat-b/README.md\""
-grep -qs "^dddd4444-0000	" "$R/docs/execution/active/feat-b/SESSIONS.log"; check "relative paths resolve against cwd" $?
+grep -qs "^dddd4444-0000	" "$R/.git/loop-sessions/feat-b.log"; check "relative paths resolve against cwd" $?
 
 hook "eeee5555-0000" "\"file_path\":\"$R/docs/execution/active/ghost/README.md\""
-[ ! -e "$R/docs/execution/active/ghost" ]; check "never creates a workstream folder that doesn't exist" $?
+[ ! -e "$R/docs/execution/active/ghost" ] && [ ! -e "$R/.git/loop-sessions/ghost.log" ]; check "never records a workstream folder that doesn't exist" $?
 
 hook "ffff6666-0000" "\"command\":\"./.claude/scripts/init-workstream.sh feat-b\""
-grep -qs "^ffff6666-0000	" "$R/docs/execution/active/feat-b/SESSIONS.log"; check "init-workstream.sh <id> records the creating session" $?
+grep -qs "^ffff6666-0000	" "$R/.git/loop-sessions/feat-b.log"; check "init-workstream.sh <id> records the creating session" $?
 
 hook "gggg7777-0000" "\"command\":\"cat docs/execution/active/feat-a/RUN_LOG.md\""
 ! grep -qs "gggg7777" "$LOG_A"; check "a read-only command records nothing" $?
@@ -62,17 +70,37 @@ check "garbage input still exits 0" $?
 printf '' | bash "$HOOK" >/dev/null 2>&1
 check "empty input still exits 0" $?
 
-chmod a-w "$R/docs/execution/active/feat-a"; rm -f "$LOG_A" 2>/dev/null
+chmod a-w "$R/.git"; rm -rf "$R/.git/loop-sessions" 2>/dev/null
 hook "hhhh8888-0000" "\"file_path\":\"$R/docs/execution/active/feat-a/RUN_LOG.md\""
-check "an unwritable workstream folder still exits 0" $?
-chmod u+w "$R/docs/execution/active/feat-a"
+check "an unwritable .git still exits 0" $?
+chmod u+w "$R/.git"
+
+NG="$T/no git"; mkdir -p "$NG/docs/execution/active/feat-n"
+hook "nnnn0000-0000" "\"file_path\":\"$NG/docs/execution/active/feat-n/RUN_LOG.md\"" "$NG"
+grep -qs "^nnnn0000-0000	" "$NG/docs/execution/active/feat-n/SESSIONS.log"; check "outside git, falls back to SESSIONS.log in the folder" $?
+
+echo "== worktree run, closed from the main checkout =="
+M="$T/main repo"; rm -rf "$M"; mkdir -p "$M/docs/execution/active/feat-w"; git init -q "$M"
+printf '# Workstream: feat-w\n' > "$M/docs/execution/active/feat-w/README.md"
+git -C "$M" add -A && git -C "$M" -c user.email=t@t -c user.name=t commit -qm init
+git -C "$M" worktree add -q "$M/.claude/worktrees/w1" -b w1 2>/dev/null
+hook "wwww1111-0000" "\"file_path\":\"$M/.claude/worktrees/w1/docs/execution/active/feat-w/RUN_LOG.md\"" "$M/.claude/worktrees/w1"
+grep -qs "^wwww1111-0000	" "$M/.git/loop-sessions/feat-w.log"; check "a worktree session lands in the shared .git/loop-sessions" $?
+git -C "$M" worktree remove --force "$M/.claude/worktrees/w1" 2>/dev/null
+grep -qs "^wwww1111-0000	" "$M/.git/loop-sessions/feat-w.log"; check "the record survives removing the worktree" $?
+python3 - "$KIT/scripts/workstream-cost" "$M" <<'PY'
+import sys; sys.path.insert(0, sys.argv[1]); import workstream_cost as w
+logs = w.session_logs(sys.argv[2], sys.argv[2] + "/docs/execution/done/feat-w")
+sys.exit(0 if logs and logs[0].endswith(".git/loop-sessions/feat-w.log") else 1)
+PY
+check "record finds the worktree's sessions from the main checkout" $?
 
 echo "== close-workstream.sh =="
 setup
 hook "aaaa1111-0000" "\"file_path\":\"$R/docs/execution/active/feat-a/RUN_LOG.md\""
 OUT=$(bash "$R/.claude/scripts/close-workstream.sh" feat-a --no-cost 2>&1)
 [ -d "$R/docs/execution/done/feat-a" ] && [ ! -e "$R/docs/execution/active/feat-a" ]; check "moves active/<id> to done/<id>" $?
-[ -f "$R/docs/execution/done/feat-a/SESSIONS.log" ]; check "SESSIONS.log travels with the folder" $?
+[ -x "$R/.claude/scripts/close-workstream.sh" ]; check "an installed copy keeps the execute bit" $?
 
 bash "$R/.claude/scripts/close-workstream.sh" feat-a --no-cost >/dev/null 2>&1
 [ $? -ne 0 ]; check "closing an already-closed workstream exits non-zero" $?
@@ -89,13 +117,14 @@ bash "$R/.claude/scripts/close-workstream.sh" feat-b --bogus >/dev/null 2>&1
 
 : > "$R/.loop-active"
 OUT=$(bash "$R/.claude/scripts/close-workstream.sh" feat-b 2>&1); RC=$?
-[ -d "$R/docs/execution/done/feat-b" ]; check "closes without SESSIONS.log" $?
-printf '%s' "$OUT" | grep -q "No SESSIONS.log"; check "says why there is no cost record" $?
+[ -d "$R/docs/execution/done/feat-b" ]; check "closes a workstream with no recorded sessions" $?
+printf '%s' "$OUT" | grep -q "No recorded sessions"; check "says why there is no run record" $?
+! printf '%s' "$OUT" | grep -q "Retry with"; check "no recorded sessions is not reported as a failure" $?
 printf '%s' "$OUT" | grep -q "rm .loop-active"; check "reminds the PM the run marker is still up" $?
 [ -f "$R/.loop-active" ]; check "never removes the run marker itself" $?
 
-mkdir -p "$R/docs/execution/active/feat-c"
-printf 'zzzz9999-not-a-real-session\t2026-01-01T00:00:00Z\t%s\n' "$R" > "$R/docs/execution/active/feat-c/SESSIONS.log"
+mkdir -p "$R/docs/execution/active/feat-c" "$R/.git/loop-sessions"
+printf 'deadbeef-0000-4000-8000-000000000000\t2026-01-01T00:00:00Z\t%s\n' "$R" > "$R/.git/loop-sessions/feat-c.log"  # well-formed, but no transcript exists
 OUT=$(HOME="$T/home" bash "$R/.claude/scripts/close-workstream.sh" feat-c 2>&1); RC=$?
 [ $RC -eq 0 ] && [ -d "$R/docs/execution/done/feat-c" ]; check "a failed cost step leaves the workstream closed and exits 0" $?
 printf '%s' "$OUT" | grep -q "Retry with"; check "a failed cost step prints the retry command" $?

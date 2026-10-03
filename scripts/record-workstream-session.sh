@@ -2,9 +2,14 @@
 # PostToolUse hook: record which Claude Code sessions worked on which workstream.
 #
 # When a session writes a file under docs/execution/active/<id>/ (Write / Edit / MultiEdit /
-# NotebookEdit), or runs init-workstream.sh <id>, its session id is appended once to
-# docs/execution/active/<id>/SESSIONS.log. close-workstream.sh prices exactly those sessions,
-# so nobody has to reconstruct afterward which sessions belonged to the run.
+# NotebookEdit), or runs init-workstream.sh <id>, its session id is appended once to the
+# workstream's session log. close-workstream.sh covers exactly those sessions, so nobody has to
+# reconstruct afterward which sessions belonged to the run.
+#
+# Where the log lives: <git common dir>/loop-sessions/<id>.log, i.e. inside .git/. Every worktree
+# of a repo shares that directory and git never commits it, so a run in a worktree is still on
+# record when the PM closes the workstream from the main checkout, and after the worktree is
+# removed. Outside a git repo the log falls back to docs/execution/active/<id>/SESSIONS.log.
 #
 # Membership is "wrote to the workstream", not "mentioned it": a session that only reads the
 # files (a status question, a Slack catch-up) is not recorded.
@@ -39,7 +44,15 @@ else
 fi
 
 [ -n "$ws_dir" ] && [ -d "$ws_dir" ] || exit 0
-log="$ws_dir/SESSIONS.log"
+id="$(basename "$ws_dir")"
+common="$(git -C "$ws_dir" rev-parse --git-common-dir 2>/dev/null)"
+if [ -n "$common" ]; then
+  case "$common" in /*) ;; *) common="$ws_dir/$common" ;; esac
+  mkdir -p "$common/loop-sessions" 2>/dev/null || exit 0
+  log="$common/loop-sessions/$id.log"
+else
+  log="$ws_dir/SESSIONS.log"
+fi
 grep -qs "^$session_id	" "$log" && exit 0
 printf '%s\t%s\t%s\n' "$session_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$cwd" >> "$log" 2>/dev/null
 exit 0

@@ -5,8 +5,9 @@
 # Usage: ./.claude/scripts/close-workstream.sh <workstream-id> [--no-cost]
 #
 # This is the PM's step, run after approving and merging. orchestrate.md never runs it: moving
-# a workstream to done/ is human-only. The run record covers the sessions listed in
-# SESSIONS.log (written by the record-workstream-session hook):
+# a workstream to done/ is human-only. The run record covers the sessions the
+# record-workstream-session hook logged in .git/loop-sessions/<id>.log, including ones that ran in
+# a worktree:
 #   - always: a "## Run record" section in the README, with time and tokens and no dollars
 #   - with a plan price set (Loop Config plan_price, or $WORKSTREAM_PLAN_PRICE): also COST.html
 #     and cost.json, pricing those tokens at live Claude API list prices against the plan
@@ -52,15 +53,15 @@ fi
 [ "$NO_COST" = "--no-cost" ] && exit 0
 
 retry="python3 \"$COST\" record --repo \"$ROOT_DIR\" --workstream \"$DST\""
-if [ ! -f "$DST/SESSIONS.log" ]; then
-  echo "No SESSIONS.log, so no run record: this workstream predates the session hook, or the hook isn't wired."
-  echo "Find its sessions by hand with: python3 \"$COST\" find --repo \"$ROOT_DIR\" --text $ID   (then: analyze)"
-  exit 0
-fi
 if ! command -v python3 >/dev/null 2>&1 || [ ! -f "$COST" ]; then
   echo "Run record skipped: python3 or $COST is missing. Retry with: $retry"
   exit 0
 fi
-if ! python3 "$COST" record --repo "$ROOT_DIR" --workstream "$DST"; then
+rc=0
+python3 "$COST" record --repo "$ROOT_DIR" --workstream "$DST" || rc=$?
+if [ "$rc" -eq 3 ]; then  # no recorded sessions: the workstream predates the hook, or it isn't wired
+  echo "No run record written. Find its sessions by hand with: python3 \"$COST\" find --repo \"$ROOT_DIR\" --text $ID   (then: analyze)"
+elif [ "$rc" -ne 0 ]; then
   echo "Run record failed (the workstream is still closed). Retry with: $retry"
 fi
+exit 0

@@ -7,7 +7,7 @@ measures calendar span vs active time. Subagent transcripts are included.
 
 Usage:
   # At close (close-workstream.sh calls this): for the sessions the hook recorded in
-  # <workstream>/SESSIONS.log, write a dollar-free Run record into the workstream README.
+  # .git/loop-sessions/<id>.log, write a dollar-free Run record into the workstream README.
   # With a plan price set (Loop Config plan_price, or $WORKSTREAM_PLAN_PRICE), also write
   # COST.html + cost.json pricing those tokens at Claude API list rates.
   python3 workstream_cost.py record --repo . --workstream docs/execution/done/my-feature
@@ -21,7 +21,7 @@ Usage:
 Read-only against transcripts. Writes only the --json / --html paths given (record: the
 workstream folder's cost.json and COST.html).
 """
-import argparse, collections, datetime as dt, glob, json, os, re, sys
+import argparse, collections, datetime as dt, glob, json, os, re, subprocess, sys
 
 # Claude API list prices, $ per million tokens:
 # (input, 5m cache write, 1h cache write, cache read, output)
@@ -314,6 +314,25 @@ def workstream_facts(ws):
     return title, subtitle, cfg, notes
 
 
+def session_logs(repo, ws):
+    """The workstream's session logs: <git common dir>/loop-sessions/<id>.log, where the hook
+    writes (shared by every worktree, never committed), plus a SESSIONS.log in the folder from
+    the first version of the hook or a repo without git."""
+    out = []
+    common = subprocess.run(["git", "-C", repo, "rev-parse", "--git-common-dir"],
+                            capture_output=True, text=True).stdout.strip()
+    if common:
+        if not os.path.isabs(common):
+            common = os.path.join(repo, common)
+        p = os.path.join(common, "loop-sessions", os.path.basename(ws) + ".log")
+        if os.path.exists(p):
+            out.append(p)
+    p = os.path.join(ws, "SESSIONS.log")
+    if os.path.exists(p):
+        out.append(p)
+    return out
+
+
 def cmd_record(a):
     """Write the Run record (time and tokens, no dollars) into the workstream README for the
     sessions the hook recorded. Only when a plan price is configured, also write COST.html and
@@ -323,17 +342,18 @@ def cmd_record(a):
     WORKSTREAM_PLAN_PRICE in the environment (a personal default that needs no per-workstream
     edit). Plan name follows the same order with plan_name / WORKSTREAM_PLAN_NAME."""
     ws = os.path.abspath(os.path.expanduser(a.workstream))
-    log = os.path.join(ws, "SESSIONS.log")
-    if not os.path.exists(log):
-        sys.exit(f"No SESSIONS.log in {ws}. Sessions are recorded by the record-workstream-session hook; "
-                 "for a workstream that predates it, use `find` then `analyze`.")
+    logs = session_logs(a.repo, ws)
     ids = []
-    for line in open(log):
-        sid = line.split("\t")[0].strip()
-        if re.fullmatch(r"[0-9a-f-]{8,}", sid) and sid not in ids:
-            ids.append(sid)
+    for log in logs:
+        for line in open(log):
+            sid = line.split("\t")[0].strip()
+            if re.fullmatch(r"[0-9a-f-]{8,}", sid) and sid not in ids:
+                ids.append(sid)
     if not ids:
-        sys.exit(f"{log} lists no sessions.")
+        print(f"No recorded sessions for {os.path.basename(ws)}. The record-workstream-session hook "
+              "logs sessions that write to the workstream; one that predates the hook has none. "
+              "Find its sessions by hand with `find`, then `analyze`.")
+        sys.exit(3)
     title, subtitle, cfg, notes = workstream_facts(ws)
     price = a.plan_price if a.plan_price is not None else cfg.get("plan_price", os.environ.get("WORKSTREAM_PLAN_PRICE"))
     name = a.plan_name or cfg.get("plan_name") or os.environ.get("WORKSTREAM_PLAN_NAME") or "subscription"
@@ -367,7 +387,7 @@ def write_run_record(ws, o):
         models.update(s.get("models", {}))
     lines = [
         "## Run record", "",
-        "<!-- Written by close-workstream.sh from SESSIONS.log; rewritten on every re-run. API-rate dollars: COST.html. -->", "",
+        "<!-- Written by close-workstream.sh from the recorded sessions; rewritten on every re-run. API-rate dollars: COST.html. -->", "",
         f"- **Calendar:** {hm(o['calendar_s'])} ({fmt(start)} → {fmt(end)})",
         f"- **Active:** {hm(o['active_s'])} (log gaps of {o['active_gap_min']:g} min or less; longer gaps count as idle)",
         f"- **Sessions:** {len(o['sessions'])}, which launched {sum(s['subagents'] for s in o['sessions'])} subagents; "
@@ -433,7 +453,7 @@ def main():
     an.add_argument("--note", action="append", help="context line shown on the bill (repeatable)")
     an.add_argument("--json"); an.add_argument("--html")
     an.add_argument("--offline", action="store_true", help="skip the live pricing fetch; use the last cached fetch")
-    rc = sub.add_parser("record", help="write the README Run record for the sessions in <workstream>/SESSIONS.log; "
+    rc = sub.add_parser("record", help="write the README Run record for the sessions the hook recorded; "
                                          "with a plan price, also COST.html + cost.json")
     rc.add_argument("--repo", required=True, help="repo root the sessions ran in")
     rc.add_argument("--workstream", required=True, help="the workstream folder")
