@@ -138,7 +138,8 @@ import sys; sys.path.insert(0, sys.argv[1]); import workstream_cost as w
 o = {"totals": {"input": 1, "cache_write_5m": 2, "cache_write_1h": 3, "cache_read": 4_000_000, "output": int(sys.argv[3])},
      "sessions": [{"start": "2026-01-01T10:00:00+00:00", "end": "2026-01-02T10:00:00+00:00", "subagents": 3,
                    "human_messages": 5, "models": {"Opus 5": 10}}],
-     "calendar_s": 86400, "active_s": 3600, "active_gap_min": 15, "notes": ["3 loop rounds (RUN_LOG.md)."], "warnings": []}
+     "calendar_s": 86400, "active_s": 3600, "attended_s": 1800, "active_gap_min": 15, "attend_window_min": 10,
+     "ticket": "ABC-123", "notes": ["3 loop rounds (RUN_LOG.md)."], "warnings": []}
 w.write_run_record(sys.argv[2], o)
 PY
 }
@@ -146,9 +147,36 @@ rr 500000
 grep -q "^## Run record" "$WS/README.md" && grep -q "Ship it." "$WS/README.md" && grep -q "round_cap: 5" "$WS/README.md"
 check "appends a Run record section and keeps the rest of the README" $?
 ! grep -q '\$' "$WS/README.md"; check "the README record carries no dollar figures" $?
+grep -q "^- \*\*Attended:\*\* 0h 30m (main-session activity within 10 min" "$WS/README.md"; check "writes the Attended line" $?
+grep -q "^- \*\*Ticket:\*\* ABC-123$" "$WS/README.md"; check "writes the Ticket line" $?
+grep -q "^- \*\*Closed:\*\* $(date +%F)$" "$WS/README.md"; check "stamps the close date on the first write" $?
+python3 - "$WS/README.md" <<'PY'
+import re, sys; p = sys.argv[1]; s = open(p).read()
+open(p, "w").write(re.sub(r"(\*\*Closed:\*\* )\S+", r"\g<1>2020-01-31", s))
+PY
 rr 900000
 [ "$(grep -c '^## Run record' "$WS/README.md")" -eq 1 ] && grep -q "(0.9M output)" "$WS/README.md"
 check "a re-run replaces the section instead of adding a second one" $?
+grep -q "^- \*\*Closed:\*\* 2020-01-31$" "$WS/README.md"; check "a re-run keeps the original close date" $?
+
+echo "== attended time =="
+python3 - "$KIT/scripts/workstream-cost" <<'PY'
+import sys, datetime as dt; sys.path.insert(0, sys.argv[1]); import workstream_cost as w
+t = lambda m: dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc) + dt.timedelta(minutes=m)
+ev = [t(m) for m in range(0, 121, 5)]          # main session busy for two hours, a log line every 5 min
+assert w.attended_seconds(ev, [t(60)], 15, 10) == 20 * 60, "one message: 10 min either side"
+assert w.attended_seconds(ev, [t(60), t(65)], 15, 10) == 25 * 60, "overlapping windows merge, no double count"
+assert w.attended_seconds(ev, [], 15, 10) == 0, "no messages, no attended time"
+gap = [t(0), t(5), t(40), t(45)]               # a 35-min silence is idle even inside a window
+assert w.attended_seconds(gap, [t(5), t(40)], 15, 30) == 10 * 60, "idle gaps never count"
+human = lambda c, **k: dict(type="user", message={"content": c}, **k)
+assert w.is_human(human("fix the bug"))
+assert w.is_human(human("<command-message>orchestrate</command-message>"))
+assert not w.is_human(human("<system-reminder>x</system-reminder>"))
+assert not w.is_human(human([{"type": "tool_result", "content": "ok"}]))
+assert not w.is_human(human("hi", isMeta=True))
+PY
+check "attended_seconds and is_human behave as documented" $?
 
 echo "== install.sh .gitignore =="
 if [ -f "$KIT/install.sh" ]; then  # absent where the suite runs from an installed copy

@@ -139,6 +139,22 @@ def parse_ts(s):
     return dt.datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone()
 
 
+def is_human(d):
+    """A message the person typed: a main-session user entry whose text isn't a tool result or a
+    harness echo. A slash-command invocation counts; system reminders and local-command output don't."""
+    if d.get("type") != "user" or d.get("isMeta"):
+        return False
+    c = d.get("message", {}).get("content")
+    if isinstance(c, list):
+        if any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c):
+            return False
+        c = " ".join(x.get("text", "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+    if not isinstance(c, str) or not c.strip():
+        return False
+    s = c.lstrip()
+    return s.startswith(("<command-message>", "<command-name>")) or not s.startswith("<")
+
+
 def read(path):
     with open(path, errors="ignore") as f:
         for line in f:
@@ -191,7 +207,7 @@ def cmd_analyze(a):
         if not sid:  # deleted by cleanupPeriodDays, or recorded on another machine
             warnings.append(f"Session {prefix[:8]} has no transcript on this machine; it is not counted.")
             continue
-        events, tok, humans, fast = [], collections.Counter(), 0, 0
+        events, main_events, human_ts, tok, fast = [], [], [], collections.Counter(), 0
         sess_models = collections.defaultdict(collections.Counter)
         final = {}  # one response is logged once per content block; the LAST entry has the final usage
         for f in [main] + subs:
@@ -199,10 +215,10 @@ def cmd_analyze(a):
                 ts = d.get("timestamp")
                 if ts:
                     events.append(parse_ts(ts))
-                if f == main and d.get("type") == "user":
-                    c = d.get("message", {}).get("content")
-                    if isinstance(c, str) and not c.startswith("<"):
-                        humans += 1
+                    if f == main:
+                        main_events.append(events[-1])
+                        if is_human(d):
+                            human_ts.append(events[-1])
                 m = d.get("message")
                 if not isinstance(m, dict) or "usage" not in m:
                     continue
@@ -224,12 +240,15 @@ def cmd_analyze(a):
                                     cache_write_1h=w1 or 0, cache_read=u.get("cache_read_input_tokens", 0),
                                     output=u.get("output_tokens", 0))
             tok.update(c); by_model[model].update(c); sess_models[model].update(c)
-        events.sort(); all_ts += events
+        events.sort(); main_events.sort(); human_ts.sort(); all_ts += events
+        humans = len(human_ts)
         if fast:
             warnings.append(f"{sid[:8]}: {fast} fast-mode responses priced at standard rates (fast mode costs 2x)")
         sessions.append({"id": sid, "label": label or sid[:8], "start": events[0].isoformat(),
                          "end": events[-1].isoformat(), "calendar_s": (events[-1] - events[0]).total_seconds(),
-                         "active_s": active_seconds(events, a.gap), "human_messages": humans,
+                         "active_s": active_seconds(events, a.gap),
+                         "attended_s": attended_seconds(main_events, human_ts, a.gap, a.attend),
+                         "human_messages": humans,
                          "subagents": len([s for s in subs if s.endswith(".jsonl")]),
                          "tokens": dict(tok), "cost": cost_of(sess_models),
                          "models": {DISPLAY.get(k, k): sum(v.values()) for k, v in sess_models.items()}})
@@ -251,11 +270,13 @@ def cmd_analyze(a):
     out = {
         "title": a.title, "subtitle": a.subtitle, "repo": os.path.basename(os.path.abspath(os.path.expanduser(a.repo))),
         "generated": dt.date.today().isoformat(), "pricing_source": PRICING["source"], "pricing_date": PRICING["date"], "pricing_how": PRICING["how"],
-        "active_gap_min": a.gap, "plan_name": a.plan_name, "plan_price": a.plan_price,
+        "active_gap_min": a.gap, "attend_window_min": a.attend, "plan_name": a.plan_name, "plan_price": a.plan_price,
         "sessions": sessions, "lines": lines, "total_cost": total,
         "totals": {t: sum(c[t] for c in by_model.values()) for t in TOKEN_TYPES},
         "calendar_s": (all_ts[-1] - all_ts[0]).total_seconds(),
         "active_s": sum(s["active_s"] for s in sessions),
+        "attended_s": sum(s["attended_s"] for s in sessions),
+        "ticket": getattr(a, "ticket", "") or "",
         "notes": a.note or [], "warnings": warnings,
     }
     if a.json:
@@ -287,7 +308,7 @@ def workstream_facts(ws):
     if obj:
         first = re.split(r"(?<=[.!?])\s", " ".join(obj.group(1).split()), maxsplit=1)[0]
         subtitle = first if len(first) <= 240 else first[:237] + "..."
-    cfg = dict(re.findall(r"^-\s*(plan_name|plan_price):\s*(.+?)\s*$", readme, re.M))
+    cfg = dict(re.findall(r"^-\s*(plan_name|plan_price|ticket):[ \t]*(\S.*?)[ \t]*$", readme, re.M))
     notes = []
     rounds = [int(n) for n in re.findall(r"^##\s+Round\s+(\d+)", _text(os.path.join(ws, "RUN_LOG.md")), re.M)]
     if rounds:
@@ -364,7 +385,8 @@ def cmd_record(a):
     priced = price > 0
     args = argparse.Namespace(
         repo=a.repo, session=[f"{sid}:Session {i + 1}" for i, sid in enumerate(ids)],
-        title=title, subtitle=subtitle, gap=a.gap, note=notes, offline=a.offline,
+        title=title, subtitle=subtitle, gap=a.gap, attend=a.attend, note=notes, offline=a.offline,
+        ticket=cfg.get("ticket", ""),
         plan_name=name, plan_price=price, dollars=priced,
         json=os.path.join(ws, "cost.json") if priced else None,
         html=os.path.join(ws, "COST.html") if priced else None)
@@ -385,19 +407,27 @@ def write_run_record(ws, o):
     models = collections.Counter()
     for s in o["sessions"]:
         models.update(s.get("models", {}))
+    path = os.path.join(ws, "README.md")
+    readme = _text(path)
+    # The close date is stamped on the first write and kept on every re-run, so re-pricing
+    # a workstream later doesn't move it into a different month.
+    kept = re.search(r"^- \*\*Closed:\*\* (\d{4}-\d{2}-\d{2})", readme, re.M)
+    closed = kept.group(1) if kept else dt.date.today().isoformat()
     lines = [
         "## Run record", "",
         "<!-- Written by close-workstream.sh from the recorded sessions; rewritten on every re-run. API-rate dollars: COST.html. -->", "",
+        f"- **Closed:** {closed}",
+    ] + ([f"- **Ticket:** {o['ticket']}"] if o.get("ticket") else []) + [
         f"- **Calendar:** {hm(o['calendar_s'])} ({fmt(start)} → {fmt(end)})",
         f"- **Active:** {hm(o['active_s'])} (log gaps of {o['active_gap_min']:g} min or less; longer gaps count as idle)",
+    ] + ([f"- **Attended:** {hm(o['attended_s'])} (main-session activity within {o['attend_window_min']:g} min of "
+          f"one of your messages; work done outside the session isn't counted)"] if "attended_s" in o else []) + [
         f"- **Sessions:** {len(o['sessions'])}, which launched {sum(s['subagents'] for s in o['sessions'])} subagents; "
         f"{sum(s['human_messages'] for s in o['sessions'])} messages from you",
         f"- **Tokens:** {big(total)} total, {big(fresh)} newly processed ({big(t['output'])} output); "
         f"the rest are cache reads of context already sent",
         "- **Models (by tokens):** " + ", ".join(f"{m} {v / max(1, sum(models.values())):.0%}" for m, v in models.most_common()),
     ] + [f"- {n}" for n in o.get("notes", [])] + [f"- **Warning:** {w}" for w in o.get("warnings", [])] + [""]
-    path = os.path.join(ws, "README.md")
-    readme = _text(path)
     section = "\n".join(lines)
     if re.search(r"^## Run record\s*$", readme, re.M):  # replace the old section, up to the next H2
         readme = re.sub(r"^## Run record\s*$.*?(?=^## |\Z)", section + "\n", readme, flags=re.M | re.S)
@@ -417,6 +447,29 @@ def active_seconds(events, gap_min):
     return sum(((b - a).total_seconds() for a, b in zip(events, events[1:]) if b - a <= gap), 0.0)
 
 
+def attended_seconds(main_events, human_ts, gap_min, window_min):
+    """The part of the main session's active time that sits within window_min of one of the
+    person's own messages. Subagent logs are left out: they run while nobody is typing."""
+    gap, w = dt.timedelta(minutes=gap_min), dt.timedelta(minutes=window_min)
+    wins = []
+    for h in human_ts:  # sorted; merge overlapping [h - w, h + w] windows
+        if wins and h - w <= wins[-1][1]:
+            wins[-1][1] = h + w
+        else:
+            wins.append([h - w, h + w])
+    total = 0.0
+    for a, b in zip(main_events, main_events[1:]):
+        if b - a > gap:
+            continue
+        for s, e in wins:
+            if s >= b:
+                break
+            lo, hi = max(a, s), min(b, e)
+            if hi > lo:
+                total += (hi - lo).total_seconds()
+    return total
+
+
 def hm(s):
     h, m = divmod(int(round(s / 60)), 60)
     d, h = divmod(h, 24)
@@ -428,7 +481,8 @@ def summary(o, dollars=True):
     out = [o["title"] + (f"  —  API cost ${o['total_cost']:,.2f}" if dollars else ""),
            f"tokens: total {sum(t.values()):,}  output {t['output']:,}  cache reads {t['cache_read']:,}  "
            f"cache writes {t['cache_write_5m'] + t['cache_write_1h']:,}  input {t['input']:,}",
-           f"time: calendar {hm(o['calendar_s'])}  active {hm(o['active_s'])} (gaps > {o['active_gap_min']} min = idle)"]
+           f"time: calendar {hm(o['calendar_s'])}  active {hm(o['active_s'])} (gaps > {o['active_gap_min']} min = idle)  "
+           f"attended {hm(o['attended_s'])} (within {o['attend_window_min']:g} min of your messages)"]
     for s in o["sessions"]:
         out.append(f"  {s['label']}: {s['start'][:16]} -> {s['end'][:16]}  calendar {hm(s['calendar_s'])}  "
                    f"active {hm(s['active_s'])}  subagents {s['subagents']}  your messages {s['human_messages']}")
@@ -448,6 +502,9 @@ def main():
     an.add_argument("--title", required=True)
     an.add_argument("--subtitle", default="")
     an.add_argument("--gap", type=float, default=15, help="minutes; longer gaps count as idle")
+    an.add_argument("--attend", type=float, default=10,
+                    help="minutes either side of one of your messages that count as attended time")
+    an.add_argument("--ticket", default="", help="ticket key or reference, carried into the JSON")
     an.add_argument("--plan-name", default="subscription", help="the flat-fee plan the work ran on")
     an.add_argument("--plan-price", type=float, default=0, help="its monthly price; 0 omits the plan comparison")
     an.add_argument("--note", action="append", help="context line shown on the bill (repeatable)")
@@ -458,6 +515,7 @@ def main():
     rc.add_argument("--repo", required=True, help="repo root the sessions ran in")
     rc.add_argument("--workstream", required=True, help="the workstream folder")
     rc.add_argument("--gap", type=float, default=15)
+    rc.add_argument("--attend", type=float, default=10)
     rc.add_argument("--plan-name", help="else plan_name in the README's Loop Config, else $WORKSTREAM_PLAN_NAME")
     rc.add_argument("--plan-price", type=float, help="else plan_price in Loop Config, else $WORKSTREAM_PLAN_PRICE; "
                                                      "unset or 0 = Run record only, no COST.html")
