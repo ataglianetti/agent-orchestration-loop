@@ -53,8 +53,11 @@ cat > "$BASE_DIR/README.md" <<README
      model_* = alias each spawn runs on (haiku / sonnet / opus, or inherit = the session's model).
      See "Model routing" in orchestrate.md for how tiers and the reviewer floor apply.
      Optional, read at close: plan_name / plan_price (e.g. "- plan_price: 200") add a COST.html
-     that prices this run's tokens at API rates against that flat fee. -->
+     that prices this run's tokens at API rates against that flat fee.
+     ticket: the tracker key or reference this work is booked against (e.g. "- ticket: ABC-123").
+     Free text; the close step copies it into the Run record so time can be tied back to it. -->
 
+- ticket:
 - round_cap: 5
 - posture: aggressive
 - escalate_to_engineer: off
