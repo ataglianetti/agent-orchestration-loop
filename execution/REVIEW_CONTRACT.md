@@ -33,12 +33,13 @@ Carried: open — F6
 Seen-set: F1–F9 · 9 findings · 5 terminal, 4 open
 Progress: 4 settled, 2 new, 1 suppressed re-raise
 
-| ID  | SEVERITY         | reachability       | consensus | FLAG-HUMAN | disposition        | summary                       |
-| --- | ---------------- | ------------------ | --------- | ---------- | ------------------ | ----------------------------- |
-| F8  | CRITICAL-ON-FLIP | dormant-at-default | 2/3       | no         | open               | unbounded text cache          |
-| F9  | NOTE             | live               | 3/3       | no         | open               | inconsistent error-log prefix |
-| F2  | WARNING          | live               | 1/3       | no         | re-raised → open   | N+1 fetch — now on the default path (reachability dormant→live) |
-| F3  | NOTE             | test-only          | 1/3       | no         | re-raised → parked | settled round 2 (R-002); unchanged severity, symbol untouched this round |
+| ID  | SEVERITY         | reachability       | origin       | consensus | FLAG-HUMAN | disposition        | summary                       |
+| --- | ---------------- | ------------------ | ------------ | --------- | ---------- | ------------------ | ----------------------------- |
+| F8  | CRITICAL-ON-FLIP | dormant-at-default | introduced   | 2/3       | no         | open               | unbounded text cache          |
+| F9  | NOTE             | live               | introduced   | 3/3       | no         | open               | inconsistent error-log prefix |
+| F10 | WARNING          | live               | pre-existing | 2/3       | no         | parked             | retry loop has no backoff — predates this workstream (R-004) |
+| F2  | WARNING          | live               | introduced   | 1/3       | no         | re-raised → open   | N+1 fetch — now on the default path (reachability dormant→live) |
+| F3  | NOTE             | test-only          | hardening    | 1/3       | no         | re-raised → parked | settled round 2 (R-002); unchanged severity, symbol untouched this round |
 
 ### Detail
 
@@ -88,6 +89,21 @@ Use these exact tokens — orchestrate's routing keys off them literally.
 | `unreachable` | Guarded or dead; cannot currently execute (a downgrade / "delete it?" signal). |
 
 SEVERITY and reachability are **independent axes**. SEVERITY = how bad if it fires; reachability = whether it can fire now. `CRITICAL-ON-FLIP` + `dormant-at-default` is the common pairing, but `WARNING` + `dormant-at-default` is valid too.
+
+### origin — *is this finding part of the work that was asked for*
+
+| Token | Meaning | Blocks the workstream? |
+| --- | --- | --- |
+| `introduced` | The workstream's own code created the bad path. The workstream diff added or changed the anchor symbol, and the bad path did not exist at the base commit. | yes — routed by severity |
+| `in-scope` | The bad path predates the workstream, but `ACCEPTANCE_CRITERIA.md` requires the behavior it breaks. The change does not do what was asked until the bad path is fixed. | yes — routed by severity |
+| `pre-existing` | The bad path existed at the base commit, and no acceptance criterion covers it. The reviewer found it because the diff sits nearby. | no — parked as follow-up |
+| `hardening` | Not a defect against the acceptance criteria. The finding is a defensive improvement past what was asked: an extra guard, a rarer edge case, a robustness upgrade. | no — parked as follow-up |
+
+Origin is the third independent axis. SEVERITY says how bad. Reachability says whether it can fire now. Origin says **whether the finding belongs to this workstream**. A `CRITICAL` can be `pre-existing`, and a `NOTE` can be `introduced`.
+
+**Origin is assigned at normalization, never by a reviewer.** Review passes see only the diff, so they cannot know the acceptance criteria or the base commit. Orchestrate assigns origin in §5 step 1b.
+
+**When origin is uncertain, assign the blocking token.** Between `introduced` and `pre-existing`, pick `introduced`. Between `in-scope` and `hardening`, pick `in-scope`. A wrong blocking tag costs one fix round. A wrong non-blocking tag ships a regression the PM never saw.
 
 ### FLAG-HUMAN — *reviewer's recommendation that this isn't auto-resolvable*
 
@@ -148,6 +164,14 @@ A normalize step (orchestrate, or a thin sub-agent it spawns) merges the passes 
 
 0. **Build the seen-set first.** Read **every** prior `## Round` block and replay its `Carried:` lines into a map of `F# → (disposition, severity-at-settlement, reachability-at-settlement, anchor, claim)`. Verify the total against the last block's `Seen-set:` line. This happens **before any `F#` is assigned** — the seen-set is what a new raw finding is matched against.
 1. **Translate** each pass's findings into the contract vocab (assign `SEVERITY` + `reachability` per the tables above; assess `FLAG-HUMAN`; record the **anchor** — file + enclosing symbol — and a one-sentence **claim**, the invariant being violated).
+
+1b. **Assign `origin`** from evidence, in this order. The first rule that matches decides.
+	1. If the bad path does not exist at the workstream's base commit, assign `introduced`. Check mechanically: `git diff $(git merge-base HEAD <base-branch>) -- <file>` must touch the anchor symbol. Then read the anchor symbol at the base commit and confirm the bad path is absent there. Use the workstream diff, not the round diff, so code written in an earlier round still counts as introduced.
+	2. If an acceptance criterion in `ACCEPTANCE_CRITERIA.md` fails while the bad path exists, assign `in-scope`. Name the criterion in the Detail entry: `Origin: in-scope (AC-3)`.
+	3. If the bad path exists at the base commit, assign `pre-existing`. Cite the evidence in the Detail entry: `Origin: pre-existing (present at <base-sha>)`.
+	4. Otherwise assign `hardening`.
+
+	If you cannot get the evidence rule 1 needs, assign `introduced`. If you cannot tell whether an acceptance criterion fails, assign `in-scope`. Never reach `pre-existing` or `hardening` by elimination when evidence was missing (§3 origin: when uncertain, block).
 2. **Dedup, in two directions.**
 	- *Within the round*, across the concurrent passes: by `(file, approximate line, issue class)`. The same underlying issue raised by multiple passes is one finding.
 	- *Across rounds*, against the whole seen-set: match on **anchor + issue class** (file + enclosing symbol, same issue class). Never match across differing issue classes — a `test-only` coverage gap and a `live` correctness bug at one symbol are two findings. Line numbers are **not** a cross-round key.
@@ -170,6 +194,7 @@ Stable IDs carry across rounds by the matching procedure in step 2 — that proc
 
 Orchestrate reads the latest `## Round N` block and applies its own **severity→action policy** (owned in `orchestrate.md`). For reference, the routing it will key off these tokens looks like:
 
+- `origin` is `pre-existing` or `hardening` → **parked as follow-up before any severity row applies**. The finding spends no fix round. A `live` `CRITICAL` with a non-blocking origin is still surfaced on the approval card, as a scope decision for the PM.
 - `CRITICAL` + `live` → executor fixes → re-review.
 - `CRITICAL-ON-FLIP` / `dormant-at-default` → fix if cheap+safe, else park on the flip-gate in `RISKS_AND_BLOCKERS.md`.
 - `WARNING` → fix if cheap, else park.

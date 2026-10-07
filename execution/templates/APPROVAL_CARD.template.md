@@ -32,17 +32,38 @@ CLEAN — AWAITING PM APPROVAL
 - **Live-check:** <ran against the real endpoint? result>
 - **Read:** <"verified three ways, all agree" · or "thin — one reviewer, no live test">
 
-## 4. Decisions needed (FLAG-HUMAN)
+## 4. Decisions needed
 
-<!-- Front and center when present. These are the ONLY things blocking you. "None." otherwise. -->
+<!-- FLAG-HUMAN findings, or the unresolved findings of a NON-CONVERGENT run. These are the ONLY things blocking you. "None." otherwise. -->
+<!-- Every finding uses the PM block below (orchestrate.md → "Writing a finding for the PM"). No SEVERITY/reachability tokens here. -->
 
-- **[F#]** <the product / irreversible / cost / contract / security-posture call, one line> → **your ruling:** ____
+**[F#] <plain-language name — what goes wrong, not where in the code>**
+- **Example:** <one concrete user, one concrete action, what they see — or "no realistic user path found; the reviewer's scenario needs <condition>">
+- **Who and how often:** <which users · everyday / uncommon / needs an unusual setup>
+- **If we ship as is:** <consequence> · <reversible how · or not reversible, because …>
+- **Fixing it here costs:** <one small task · a round of rework · a new workstream> · touches <what>
+- **Recommendation:** <fix here · ship and ticket · your call> — <one-line reason>
+- **Your ruling:** ____
 
-## 5. Findings digest
+## 5. Found outside this change
 
-- **Auto-fixed criticals** (one line each — never hidden):
-  - **[F#]** <what it was → fixed and re-reviewed>
-- **Parked** (warnings/notes): <count> → `RISKS_AND_BLOCKERS.md`
+<!-- Live CRITICAL findings that are pre-existing or hardening (origin gate, orchestrate.md 2d). NOT blocking — the loop parked them. -->
+<!-- They are here because fixing one widens the scope, which is your call. Same PM block as §4. "None." otherwise. -->
+
+**[F#] <plain-language name>**
+- **Example:** <…>
+- **Who and how often:** <…>
+- **If we ship as is:** <… — note that this is already true in production today>
+- **Fixing it here costs:** <…>
+- **Recommendation:** <fix here · ticket it> — <one-line reason>
+
+- **Other follow-ups parked:** <count> → `RISKS_AND_BLOCKERS.md` (tagged `follow-up`)
+
+## 6. Findings digest
+
+- **Auto-fixed criticals** (one plain-language line each — never hidden):
+  - **[F#]** <what a user would have seen → fixed and re-reviewed>
+- **Parked in-scope warnings/notes:** <count> → `RISKS_AND_BLOCKERS.md`
 - **Depth:** full review `REVIEW.md` · evidence `TEST_RESULTS.md` · decisions `DECISIONS.md`
 
 ## Approval (human-only)
