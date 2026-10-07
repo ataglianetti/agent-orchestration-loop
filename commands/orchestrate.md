@@ -90,10 +90,21 @@ A guardrail / contract / security touch **always forces Deep**, regardless of si
 
 **A review pass's input is the round's diff, and nothing else.** Never hand a pass the seen-set, the `Carried:` lines, or a prior disposition "so it doesn't re-find things." The ledger below lives in normalization, downstream of assessment — that separation is what keeps the passes independent, and independence is the whole basis of the consensus number.
 
-Normalize the passes into one block and **append** it to `REVIEW.md` as `## Round N`: the `VERDICT` line, the `Carried:` / `Seen-set:` / `Progress:` lines, the findings table (`F# | SEVERITY | reachability | consensus | FLAG-HUMAN | disposition | summary`), and per-finding detail. Severity = the max any pass assigned; consensus = M/N (of the passes actually run); `FLAG-HUMAN` = yes if any pass flagged it. **Before assigning any `F#`, build the seen-set** by reading every prior `## Round` block, and match each raw finding against it per `REVIEW_CONTRACT.md` §5 — a finding that already has an `F#` keeps it. **Append the block once, at the close of the round, with 2d's routing outcomes already written into the `disposition` column** — `REVIEW.md` stays append-only: one write per round, never a rewrite. The prose also goes to `RUN_LOG.md` — **never surfaced to the PM directly.**
+Normalize the passes into one block and **append** it to `REVIEW.md` as `## Round N`: the `VERDICT` line, the `Carried:` / `Seen-set:` / `Progress:` lines, the findings table (`F# | SEVERITY | reachability | origin | consensus | FLAG-HUMAN | disposition | summary`), and per-finding detail. Severity = the max any pass assigned; consensus = M/N (of the passes actually run); `FLAG-HUMAN` = yes if any pass flagged it; origin = your call from evidence, per `REVIEW_CONTRACT.md` §5 step 1b (the reviewers never assign it, because they never see the acceptance criteria). **Before assigning any `F#`, build the seen-set** by reading every prior `## Round` block, and match each raw finding against it per `REVIEW_CONTRACT.md` §5 — a finding that already has an `F#` keeps it. **Append the block once, at the close of the round, with 2d's routing outcomes already written into the `disposition` column** — `REVIEW.md` stays append-only: one write per round, never a rewrite. The prose also goes to `RUN_LOG.md` — **never surfaced to the PM directly.**
 
 ### 2d. Route — your severity→action policy (you own this; the reviewer only assessed)
-Where the repo's posture is aggressive (reversible work — see Per-repo specifics), route **aggressively**:
+
+**Origin gate — applies first, under every posture.** The loop fixes what it was asked to build. It does not fix everything a reviewer can find near the diff.
+
+| origin | Action |
+| --- | --- |
+| `introduced` / `in-scope` | Route by the severity table below. |
+| `pre-existing` / `hardening` | **Park as follow-up.** Set disposition `parked`, write an `R-###` row in `RISKS_AND_BLOCKERS.md` tagged `follow-up`, and spend no executor on the finding. |
+| `pre-existing` / `hardening` **and** `CRITICAL` + `live` | Park as above. Also list the finding in the approval card's §5, "Found outside this change," in PM terms. Fixing it here widens the scope, so the call belongs to the PM. The finding does not stop the run. |
+
+A follow-up park is terminal, so it never holds `VERDICT` open and never uses up `round_cap`. An origin can change. Whenever the escape hatch below reopens a finding, assign origin again from the current code before routing it. A reopened `pre-existing` finding whose anchor this workstream has now edited usually becomes `introduced`.
+
+Where the repo's posture is aggressive (reversible work — see Per-repo specifics), route the blocking findings **aggressively**:
 
 | Finding | Action |
 | --- | --- |
@@ -122,7 +133,7 @@ Record every routing decision (and every auto-resolved critical) in `DECISIONS.m
 
 **Suppression is never invisible.** Add one line to the `RUN_LOG.md` round entry: `Suppressed re-raises: F9 (parked R-009, round 4), F20 (rejected, round 2).` The loop declining to act is a routing decision like any other, and it goes on the record — in `RUN_LOG.md`, not `DECISIONS.md`, because nothing was decided.
 
-**On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#` — the only things blocking — fill §1–3 for context with depth linked in §5, link the card from `README.md`, **leave the run marker in place**, and **end the run**. Do not rule on the finding, resolve it, or proceed past it.
+**On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#`, each written per **Writing a finding for the PM** (step 3) — the only things blocking — fill §1–3 for context with depth linked in §6, link the card from `README.md`, **leave the run marker in place**, and **end the run**. Do not rule on the finding, resolve it, or proceed past it.
 
 **A `FLAG-HUMAN` is a stop even when it looks already-decided.** If you believe the KICKOFF or `DECISIONS.md` already settles it, do **not** rule and do **not** record a ruling — surface it on the card quoting the exact line that appears to settle it (`appears consistent with KICKOFF: "<quote>" — confirm?`) and stop. A settled decision belongs to its real source (the KICKOFF the PM wrote); never manufacture a fresh "PM ruled `<today>`" event. The loop continues only after the PM's ruling exists in `DECISIONS.md` — written by the PM, not by you — and they re-invoke `/orchestrate <id>`.
 
@@ -146,7 +157,7 @@ Evaluate these rules **in order**; the first that matches decides.
 - `VERDICT == CLEAN` **and** all gates pass → exit to **step 3**.
 - **Run dry** — the round's `Carried: settled` delta is empty, the table holds no new `F#` above `NOTE`, **and the open set holds nothing above `NOTE`** → the review axis has converged; treat as `CLEAN` for loop control and exit to **step 3** if the gates pass.
 - **Stalled** — the `settled` delta is empty and no new `F#` above `NOTE` was raised, but the open set still holds a finding above `NOTE` → this is not convergence. Stop with `## Status: NON-CONVERGENT`, exactly as the round-cap rule below. A stalled loop must never exit as `CLEAN`; `CLEAN` means nothing above `NOTE` is open (`REVIEW_CONTRACT.md` §3).
-- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read + **the per-round `settled / new` progress read**, so the PM can tell a converging run from a stuck one), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop. No clean exit.
+- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (each unresolved finding in §4, written per **Writing a finding for the PM** + the confidence read + **the per-round `settled / new` progress read**, so the PM can tell a converging run from a stuck one), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop. No clean exit.
 - Otherwise → next round (back to 2a: execute fixes, then the next wave).
 
 ## 3. Clean exit — write the card, then HALT
@@ -158,7 +169,30 @@ Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`,
 1. **What you asked for → what it built** — intent match; flag any scope drift.
 2. **How reversible** — flag / dark-launch / one-commit revert = wrong is cheap; touches money / a contract / a data migration / anonymous-access scope = engage here. Include the one-line revert path.
 3. **How confident** — the 2e read (independent reviewers + coverage + live-check agree? gaps?).
-4. **Findings digest** — auto-fixed criticals one line each (never hidden), warnings/notes parked silently with a count, any remaining `FLAG-HUMAN` front and center.
+4. **Decisions needed** — any remaining `FLAG-HUMAN`, front and center, each written per **Writing a finding for the PM** below.
+5. **Found outside this change** — every `pre-existing` / `hardening` finding that is `CRITICAL` + `live`, each written per **Writing a finding for the PM**. Then one line counting the other follow-ups parked to `RISKS_AND_BLOCKERS.md`.
+6. **Findings digest** — auto-fixed criticals one line each (never hidden), in plain language; in-scope warnings/notes parked with a count.
+
+### Writing a finding for the PM
+
+The PM approves scope and reversibility, not code. Engineering vocabulary on the card turns that approval blind. So every finding the card asks the PM to judge (§4 and §5) uses this block, and SEVERITY / reachability tokens stay in `REVIEW.md`:
+
+```markdown
+**[F#] <plain-language name — what goes wrong, not where in the code>**
+- **Example:** <one concrete user, one concrete action, what they see>
+- **Who and how often:** <which users, and whether the path is everyday, uncommon, or needs an unusual setup>
+- **If we ship as is:** <the consequence> · <reversible: one-commit revert / flag off · or: not reversible, because …>
+- **Fixing it here costs:** <one small task · a round of rework · a new workstream> · touches <what>
+- **Recommendation:** <fix here · ship and ticket · your call> — <one-line reason>
+```
+
+Rules for the block:
+
+- **Build the example from the actual code path and the acceptance criteria.** Name a real user type of this product, a real action in its UI or API, and the result the code produces. Never invent a feature, a screen, or a user type to make the story vivid.
+- **If you cannot trace a realistic user path, write that instead.** Write `Example: no realistic user path found — the reviewer's scenario needs <condition>.` That sentence is itself the strongest "ship and ticket" evidence the card can carry.
+- **If the affected party is not an end user, name who it is.** Examples: the on-call engineer reading logs, the nightly import job, a downstream API client. Keep the same concreteness.
+- **No undefined jargon.** If a technical term is unavoidable, define it in a half-sentence on first use.
+- **The recommendation is yours; the ruling is the PM's.** Recommend, then stop. Never record the outcome.
 
 Then **leave the run marker in place** and **end the run** with one line: `AWAITING PM APPROVAL — <id> on <branch>; card at <path>. Clear the gate when you act: rm .loop-active`. Keep depth one step away (links to `REVIEW.md` / `TEST_RESULTS.md` / `DECISIONS.md`), never the full review in their face. The PM approves **intent/scope and reversibility only** — correctness was delegated to the verification stack (which is why it had to be strong enough to earn a blind sign-off).
 
