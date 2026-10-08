@@ -231,6 +231,64 @@ ERRTEXT=$(printf '{"tool_name":"Bash","tool_input":{"command":"git push"}}' \
 if [ -n "$ERRTEXT" ]; then PASS=$((PASS + 1)); else
   FAIL=$((FAIL + 1)); echo "  FAIL: blocked command produced no stderr reason"; fi
 
+echo "== G13: in a worktree session, the soft marker is found from the hook input's cwd =="
+# Claude Code can set CLAUDE_PROJECT_DIR to the main checkout while the session works in a git
+# worktree. The input's `cwd` names the checkout the command really runs in.
+WT="$(mkdir -p "$TMPROOT/wt" && cd "$TMPROOT/wt" && pwd -P)"   # git reports physical paths
+git -C "$WT" init -q main && git -C "$WT/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
+git -C "$WT/main" worktree add -q "$WT/main/.claude/worktrees/a" -b a 2>/dev/null
+git -C "$WT/main" worktree add -q "$WT/sib" -b sib 2>/dev/null
+mkdir -p "$WT/main/.claude/worktrees/a/src/deep"
+run_guard_cwd() { # $1 = CLAUDE_PROJECT_DIR, $2 = cwd, $3 = command
+  printf '{"tool_name":"Bash","cwd":%s,"tool_input":{"command":%s}}' \
+    "$(printf '%s' "$2" | jq -Rs .)" "$(printf '%s' "$3" | jq -Rs .)" \
+    | CLAUDE_PROJECT_DIR="$1" bash "$GUARD" 2>/dev/null
+  return $?
+}
+expect_cwd() { # $1 = label, $2 = expected exit code, $3 = cwd, $4 = command
+  run_guard_cwd "$WT/main" "$3" "$4"
+  local rc=$?
+  if [ $rc -eq "$2" ]; then PASS=$((PASS + 1)); else
+    FAIL=$((FAIL + 1)); echo "  FAIL (expected exit $2, got $rc): $1 — $4"; fi
+}
+A="$WT/main/.claude/worktrees/a"
+: > "$A/.loop-active"
+expect_cwd "marker in worktree, cwd = worktree"        2 "$A" 'git push origin a'
+expect_cwd "marker in worktree, cwd = worktree subdir" 2 "$A/src/deep" 'git push origin a'
+expect_cwd "marker in worktree, pr create"             2 "$A" 'gh pr create --fill'
+ERRTEXT=$(printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"git push"}}' "$A" \
+  | CLAUDE_PROJECT_DIR="$WT/main" bash "$GUARD" 2>&1 >/dev/null)
+printf '%s' "$ERRTEXT" | grep -Fq "rm '$A/.loop-active'" && PASS=$((PASS + 1)) || {
+  FAIL=$((FAIL + 1)); echo "  FAIL: worktree denial does not name the worktree's marker"; }
+rm -f "$A/.loop-active"
+: > "$WT/main/.loop-active"
+expect_cwd "marker in main only, cwd = worktree (union)" 2 "$A" 'git push origin a'
+ERRTEXT=$(printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"git push"}}' "$A" \
+  | CLAUDE_PROJECT_DIR="$WT/main" bash "$GUARD" 2>&1 >/dev/null)
+printf '%s' "$ERRTEXT" | grep -Fq "rm '$WT/main/.loop-active'" && PASS=$((PASS + 1)) || {
+  FAIL=$((FAIL + 1)); echo "  FAIL: union denial does not name the main checkout's marker"; }
+: > "$A/.loop-active"
+ERRTEXT=$(printf '{"tool_name":"Bash","cwd":"%s","tool_input":{"command":"git push"}}' "$A" \
+  | CLAUDE_PROJECT_DIR="$WT/main" bash "$GUARD" 2>&1 >/dev/null)
+{ printf '%s' "$ERRTEXT" | grep -Fq "rm '$A/.loop-active'" \
+  && printf '%s' "$ERRTEXT" | grep -Fq "rm '$WT/main/.loop-active'"; } && PASS=$((PASS + 1)) || {
+  FAIL=$((FAIL + 1)); echo "  FAIL: with markers in both checkouts, the denial does not name both"; }
+rm -f "$A/.loop-active" "$WT/main/.loop-active"
+expect_cwd "no marker anywhere, cwd = worktree"        0 "$A" 'git push origin a'
+: > "$WT/sib/.loop-active"
+expect_cwd "marker in a sibling worktree only"         0 "$A" 'git push origin a'
+expect_cwd "marker in a sibling worktree only, main"   0 "$WT/main" 'git push origin main'
+expect_cwd "the sibling itself is gated"               2 "$WT/sib" 'git push origin sib'
+rm -f "$WT/sib/.loop-active"
+#   A push alias configured only in the worktree's checkout resolves from cwd, not the project dir.
+: > "$A/.loop-active"
+git -C "$WT/main" config extensions.worktreeConfig true
+git -C "$A" config --worktree alias.wp push
+[ -z "$(git -C "$WT/main" config --get alias.wp)" ] && PASS=$((PASS + 1)) || {
+  FAIL=$((FAIL + 1)); echo "  FAIL: suite setup — the worktree-only alias leaked into the main checkout"; }
+expect_cwd "push alias resolved from the cwd checkout" 2 "$A" 'git wp'
+rm -f "$A/.loop-active"
+
 echo "== malformed input fails open =="
 if printf 'not json' | CLAUDE_PROJECT_DIR="$TMPROOT/marked" bash "$GUARD" >/dev/null 2>&1; then
   PASS=$((PASS + 1)); else

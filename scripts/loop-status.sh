@@ -31,8 +31,11 @@ fi
 REPO="$(cd "${GUARD_MAIN:-$KEY_BASE}" && pwd -P)"
 HARD="$GUARD_DIR/$GUARD_KEY"
 LEGACY="$GUARD_DIR/$GUARD_LEGACY_KEY"
-# The soft marker is per checkout: the loop writes it at the root of the project it runs in.
-SOFT="${CLAUDE_PROJECT_DIR:-$(git -C "$KEY_BASE" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")}/.loop-active"
+# The soft marker is per checkout: the loop writes it at the root of the checkout it runs in. That
+# is the checkout you run this from, so $PWD's top level wins over $CLAUDE_PROJECT_DIR, which in a
+# session inside a git worktree can name a different checkout (the main one). The project dir is
+# only the fallback when $PWD is not inside a git repo.
+SOFT="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")/.loop-active"
 CLAUDE_DIR="${LOOP_CLAUDE_DIR:-$REPO/.claude}"
 
 # Resolve a symlinked .claude the same way lock/unlock do. Checking the link instead of its
