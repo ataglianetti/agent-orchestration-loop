@@ -31,10 +31,23 @@ INPUT=$(cat)
 CMD=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$CMD" ] && exit 0
 
-ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+# ROOT is the checkout this command runs in: the git top level of the hook input's `cwd`. It is
+# NOT $CLAUDE_PROJECT_DIR first, because in a session inside a git worktree that variable can name
+# a different checkout (the main one) than the worktree the session is working in, and a loop in
+# a worktree writes its marker at the worktree's root. Without a `cwd`, it is the old default.
+CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+if [ -n "$CWD" ]; then
+  ROOT="$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$CWD")"
+else
+  ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+fi
 
 # The gate is active if EITHER marker is present:
-#   - soft: `$ROOT/.loop-active`, written by the loop itself (default, zero-friction runs). The
+#   - soft: `.loop-active`, written by the loop itself (default, zero-friction runs), at the root
+#     of the checkout this command runs in ($ROOT) or at the old root, $CLAUDE_PROJECT_DIR (else
+#     the current directory). Both are checked, so resolving ROOT from `cwd` never stops a marker
+#     that gated before from gating now. A marker in some OTHER worktree of the repo does not gate
+#     this one, so parallel sessions stay free. The
 #     agent can write it, so the agent can in principle remove it — sections 2/3 below wall the
 #     known removal paths, but a soft marker is only ever as strong as that list of paths.
 #   - hard: a root-owned file under $LOOP_GUARD_DIR, dropped by `sudo lock-loop.sh` for a run you
@@ -58,10 +71,19 @@ GUARD_KEY="$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
 # too, so a lock taken before the upgrade is neither ignored nor left behind.
 GUARD_LEGACY_KEY="$(printf '%s' "$(git -c safe.directory='*' -C "$KEY_BASE" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$KEY_BASE")" | cksum | cut -d' ' -f1)"
 # <<< guard key
-[ -n "$GUARD_REPO" ] || GUARD_REPO="$ROOT"   # not a git repo: key on the project dir itself
+[ -n "$GUARD_REPO" ] || GUARD_REPO="$KEY_BASE"   # not a git repo: key on the project dir itself
 HARD_MARKER="$LOOP_GUARD_DIR/$(printf '%s' "$GUARD_REPO" | cksum | cut -d' ' -f1)"
 LEGACY_MARKER="$LOOP_GUARD_DIR/$GUARD_LEGACY_KEY"
-[ -f "$ROOT/.loop-active" ] || [ -f "$HARD_MARKER" ] || [ -f "$LEGACY_MARKER" ] || exit 0   # no active loop → no restriction
+# The soft markers that actually exist, so the override names the file to clear (one, or two when
+# the cwd checkout and the project dir are different checkouts that both carry one).
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$PWD}"
+SOFT_DIR=""; SOFT_DIR2=""
+[ -f "$ROOT/.loop-active" ] && SOFT_DIR="$ROOT"
+if [ -f "$PROJECT_ROOT/.loop-active" ] \
+  && ! { [ -n "$SOFT_DIR" ] && [ "$PROJECT_ROOT/.loop-active" -ef "$SOFT_DIR/.loop-active" ]; }; then
+  if [ -z "$SOFT_DIR" ]; then SOFT_DIR="$PROJECT_ROOT"; else SOFT_DIR2="$PROJECT_ROOT"; fi
+fi
+[ -n "$SOFT_DIR" ] || [ -f "$HARD_MARKER" ] || [ -f "$LEGACY_MARKER" ] || exit 0   # no active loop → no restriction
 
 deny() {
   printf '%s\n' "$1" >&2
@@ -72,14 +94,15 @@ deny() {
 # `rm .loop-active` does nothing, and telling the human to run it sends them the wrong way.
 UNLOCK_CMD="sudo ./.claude/scripts/unlock-loop.sh"
 if [ -f "$HARD_MARKER" ] || [ -f "$LEGACY_MARKER" ]; then
-  if [ -f "$ROOT/.loop-active" ]; then
-    OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent), from inside the repo: $UNLOCK_CMD, then rm '$ROOT/.loop-active'"
+  if [ -n "$SOFT_DIR" ]; then
+    OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent), from inside the repo: $UNLOCK_CMD, then rm '$SOFT_DIR/.loop-active'"
   else
     OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent), from inside the repo: $UNLOCK_CMD"
   fi
 else
-  OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent): rm '$ROOT/.loop-active'"
+  OVERRIDE="If you are the human acting deliberately, clear the gate from your own terminal (not through the agent): rm '$SOFT_DIR/.loop-active'"
 fi
+[ -n "$SOFT_DIR2" ] && OVERRIDE="$OVERRIDE, then rm '$SOFT_DIR2/.loop-active'"
 
 # 1. Human-gated, outward-facing actions the loop must never take on its own.
 #    This is text matching, so it is a strong filter, not a wall: a command whose words are built

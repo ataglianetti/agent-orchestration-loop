@@ -27,7 +27,12 @@ field() {  # first "key": "value" string in the hook input
 session_id="$(field session_id)"
 [ -n "$session_id" ] || exit 0
 cwd="$(field cwd)"
-root="${CLAUDE_PROJECT_DIR:-$cwd}"
+# The checkout the session works in is the git top level of its `cwd`, not $CLAUDE_PROJECT_DIR:
+# in a session inside a git worktree that variable can name a different checkout (the main one),
+# where the worktree's new workstream folder does not exist yet, so nothing was recorded.
+root=""
+[ -n "$cwd" ] && root="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$cwd")"
+[ -n "$root" ] || root="${CLAUDE_PROJECT_DIR:-$PWD}"
 [ -n "$root" ] || exit 0
 
 ws_dir=""
@@ -41,6 +46,11 @@ else
   command="$(field command)"
   id="$(printf '%s' "$command" | sed -n 's|.*init-workstream\.sh[[:space:]][[:space:]]*\([A-Za-z0-9._-][A-Za-z0-9._-]*\).*|\1|p' | head -n 1)"
   [ -n "$id" ] && ws_dir="$root/docs/execution/active/$id"
+  # Still try the project dir when the cwd checkout has no such folder, so a case that recorded
+  # before (cwd outside the project) keeps recording.
+  if [ -n "$id" ] && [ ! -d "$ws_dir" ] && [ -n "$CLAUDE_PROJECT_DIR" ]; then
+    ws_dir="$CLAUDE_PROJECT_DIR/docs/execution/active/$id"
+  fi
 fi
 
 [ -n "$ws_dir" ] && [ -d "$ws_dir" ] || exit 0

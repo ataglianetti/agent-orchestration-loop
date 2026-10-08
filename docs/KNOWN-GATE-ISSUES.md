@@ -20,5 +20,6 @@ Defects in the loop's human gate (the ship guard, the soft and hard run markers,
 | G10 | NOTE             | The review-contract example failed its own checksum. | #16 |
 | G11 | WARNING          | A claim-only match reused an existing `F#`, putting one ID in two settled lists. | #17 |
 | G12 | WARNING          | Under a hard lock, each worktree's own `.claude/` stayed writable. | #13 |
+| G13 | WARNING (live)   | In a worktree session, `CLAUDE_PROJECT_DIR` named the main checkout, so the guard missed the worktree's `.loop-active` and the session record missed its `init-workstream.sh`. | `fix/worktree-project-dir` |
 
 Not a code fix: branch protection on `main` (pull request required, admins included) was turned on as the backstop for anything the guard's text matching misses.

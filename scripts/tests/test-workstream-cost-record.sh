@@ -95,6 +95,26 @@ sys.exit(0 if logs and logs[0].endswith(".git/loop-sessions/feat-w.log") else 1)
 PY
 check "record finds the worktree's sessions from the main checkout" $?
 
+echo "== G13: init-workstream.sh in a worktree, with CLAUDE_PROJECT_DIR on the main checkout =="
+# Claude Code can set CLAUDE_PROJECT_DIR to the main checkout while the session works in a git
+# worktree, where the new workstream folder exists only in the worktree.
+git -C "$M" worktree add -q "$M/.claude/worktrees/w2" -b w2 2>/dev/null
+W2="$M/.claude/worktrees/w2"
+mkdir -p "$W2/docs/execution/active/demo" "$W2/src"
+[ ! -e "$M/docs/execution/active/demo" ]; check "suite setup: demo exists only in the worktree" $?
+hook_split() { # $1 = session id, $2 = cwd, $3 = command; CLAUDE_PROJECT_DIR is the main checkout
+  printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"%s"}}' \
+    "$1" "$2" "$3" | CLAUDE_PROJECT_DIR="$M" bash "$HOOK" >/dev/null 2>&1
+}
+hook_split "iiii9999-0000" "$W2" "./.claude/scripts/init-workstream.sh demo"
+check "hook exits 0" $?
+grep -qs "^iiii9999-0000	" "$M/.git/loop-sessions/demo.log"; check "init in a worktree records the session in the shared log" $?
+hook_split "jjjj0000-0000" "$W2/src" "../.claude/scripts/init-workstream.sh demo"
+grep -qs "^jjjj0000-0000	" "$M/.git/loop-sessions/demo.log"; check "init from a worktree subdir records too" $?
+hook_split "kkkk1111-0000" "$W2" "./.claude/scripts/init-workstream.sh ghost"
+[ ! -e "$M/.git/loop-sessions/ghost.log" ]; check "init for a folder that exists nowhere records nothing" $?
+git -C "$M" worktree remove --force "$W2" 2>/dev/null
+
 echo "== close-workstream.sh =="
 setup
 hook "aaaa1111-0000" "\"file_path\":\"$R/docs/execution/active/feat-a/RUN_LOG.md\""

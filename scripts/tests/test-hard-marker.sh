@@ -246,6 +246,14 @@ printf '%s' "$OUT" | grep -q "^    .*/r/.loop-active" \
   && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status listed its own checkout's marker as another worktree's"; }
 printf '%s' "$OUT" | grep -q "rm '" \
   && { FAIL=$((FAIL+1)); echo "  FAIL: status still suggests rm for the soft marker"; } || PASS=$((PASS+1))
+# G13: inside a worktree, with CLAUDE_PROJECT_DIR naming the main checkout (as Claude Code can set
+# it), the soft marker that counts is the worktree's own.
+rm -f "$LS/r/.loop-active"
+OUT=$( cd "$LS/w b" && CLAUDE_PROJECT_DIR="$LS/r" LOOP_GUARD_DIR="$TG/ls-guard" bash "$STATUS" 2>/dev/null ); RC=$?
+{ [ $RC -eq 0 ] && printf '%s' "$OUT" | grep -q '^ACTIVE' && printf '%s' "$OUT" | grep -q "soft: .*w b/.loop-active"; } \
+  && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: status in a gated worktree with CLAUDE_PROJECT_DIR on main did not report ACTIVE"; }
+OUT=$( cd "$LS/r" && CLAUDE_PROJECT_DIR="$LS/r" LOOP_GUARD_DIR="$TG/ls-guard" bash "$STATUS" 2>/dev/null ); RC=$?
+[ $RC -eq 1 ] && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); echo "  FAIL: a gated worktree made the main checkout ACTIVE"; }
 rm -rf "$LS"
 
 echo "== lock/unlock refuse to run without root (so a non-root agent cannot self-lock/unlock) =="
