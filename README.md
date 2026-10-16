@@ -41,8 +41,10 @@ You ideate and judge; the loop plans, builds, verifies, and reviews. It can't sh
 2. **Walk away.** It plans, makes atomic commits, runs your tests + a live check, runs 1–3 independent reviews (depth scales to the change's blast radius), auto-resolves routine findings, and loops.
 3. **It stops at one of three places** and tells you:
    - **CLEAN — awaiting approval:** verification passed; read the approval card and, if it's good, open the PR yourself.
-   - **FLAG-HUMAN:** a decision only a human should make (scope, money, a contract, a security posture). Record your ruling in `DECISIONS.md`, then re-run `/orchestrate <id>` to continue.
+   - **FLAG-HUMAN:** a decision only a human should make (scope, money, a contract, a security posture). Rule in the run's chat ("go with your recommendations", or per item) and it records your words verbatim and continues. Or record your ruling in `DECISIONS.md` and re-run `/orchestrate <id>`.
    - **NON-CONVERGENT:** it hit the round cap without going clean; read `RISKS_AND_BLOCKERS.md` and decide whether to retry, narrow scope, or hand off.
+
+   In the Claude desktop app, a stopped run shows as *waiting on you* in the session rail, titled `<id> · orchestrate`, with the card path in its status. The app pieces are optional; the CLI runs the same loop without them.
 4. **You approve two things — only two:** _intent/scope_ (is this what you asked for?) and _reversibility_ (if it's wrong, how bad and how recoverable?). You are **not** certifying correctness — that's what the verification stack is for. Read the **approval card**, not the diff.
 
 The audit trail lives in `docs/execution/active/<id>/`: `APPROVAL_CARD.md` is the front page; `REVIEW.md`, `DECISIONS.md`, `TEST_RESULTS.md`, and `RUN_LOG.md` are the depth.
