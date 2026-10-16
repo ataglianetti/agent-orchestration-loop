@@ -36,7 +36,9 @@ CLEAN — AWAITING PM APPROVAL
 
 <!-- Front and center when present. These are the ONLY things blocking you. "None." otherwise. -->
 
-- **[F#]** <the product / irreversible / cost / contract / security-posture call, one line> → **your ruling:** ____
+- **[F#]** <the product / irreversible / cost / contract / security-posture call, one line>
+  - **Recommendation:** <the option you'd pick, and one line of why — recommending is allowed; ruling is not>
+  - **Your ruling:** ____
 
 ## 5. Findings digest
 
@@ -55,6 +57,6 @@ CLEAN — AWAITING PM APPROVAL
 
 ## Next — the PM's actions (the loop performs none of these)
 
-- **Approve** → fill the Approval block above, then open the PR / merge / relocate the workstream to `done/`
-- **Rule on §4** → record the ruling in `DECISIONS.md`, then re-invoke `/orchestrate <id>`
+- **Approve** → fill the Approval block above (or say it in the run's chat; the loop records your words in `DECISIONS.md` and hands back the gate command), clear the gate, then open the PR / merge / relocate the workstream to `done/`
+- **Rule on §4** → say it in the run's chat ("go with your recommendations", or per item); the loop records your words verbatim and continues. Or record the ruling in `DECISIONS.md` yourself, then re-invoke `/orchestrate <id>`
 - **Show the review** → `REVIEW.md` (latest round) · `RUN_LOG.md`

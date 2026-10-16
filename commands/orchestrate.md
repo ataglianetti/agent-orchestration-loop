@@ -57,6 +57,34 @@ Values are model aliases (`haiku` / `sonnet` / `opus`), which resolve to the cur
 3. **A reviewer is never on a cheaper model than the code it reviews.** Passes review the round's whole diff, so if *any* task in the round ran on `model_hard`, **every** pass that round runs on `model_hard`. Only a round whose tasks all ran on cheaper models uses `model_review_light` for the non-adversarial passes. The review gate is what makes cheap executors safe; it does not get cheaper than the work.
 4. **Record what ran.** Write the tier and model into each contract's `## Model` section (`SUBAGENTS/T-xxx.md`, including any escalation and why). Add one line per round to `RUN_LOG.md`, e.g. `Models: T-501 sonnet (standard), T-502 opus (hard, escalated after 2 validation failures); review: all opus (T-502 ran on opus).` A cost review can't tell a cheap model that worked from one that forced a rerun without this line.
 
+## Run visibility — the Claude app surface
+
+The Claude desktop app shows each session in a sidebar rail with a status line, a pinned task list, chapters, and an end-of-turn recap box. A loop that uses them can be read from the rail without opening the transcript. Every tool below is **optional**: if it isn't in your tool list (or listed as deferred — load it with `ToolSearch`), skip that step silently. The CLI has none of them, and the loop runs the same without them.
+
+- **Title.** At step 0, set the session title to `<id> · orchestrate` (`set_session_title`).
+- **Chapters.** Mark a chapter at the start of each round (`Round N`) and one at the hard stop (`Approval card`) (`mark_chapter`). The transcript's table of contents then jumps straight to the round a finding appeared in.
+- **Task list.** Each round, send the round's stages as the task list (`update_plan`): `Execute wave N` · `Verify` · `Review` · `Route` — plus `Write approval card` on the round that stops. Advance it as each stage starts. Don't improvise a different list.
+- **Wait on every subagent.** The planner, executor, verify and review Tasks run in the **foreground** (`run_in_background: false`): the next step reads their result. Executors in the same wave go out in one message, all foreground, so they still run in parallel. A backgrounded Task ends your turn early, and every turn-end draws a recap box mid-run.
+
+### The stop protocol — every hard stop ends this way
+
+A hard stop is a clean exit (step 3), a `FLAG-HUMAN` pause (2d), non-convergence or a stalled run (2f), or a normalizer defect (2f). After the card is written and linked:
+
+1. **Print the stop line as text**, before any end-of-turn tool call:
+   `<STATUS> — <id> on <branch>; card at <path>. Clear the gate when you act: rm .loop-active`
+   `<STATUS>` is the card's `## Status` line. The end-of-turn box suppresses text written after it, so the line goes first or it never prints.
+2. **Push a notification** with the same line (`PushNotification`).
+3. **Close the turn with the recap box** (`wrap_up`), `blocked: true`. The recap's first sentence becomes the sidebar status, so open it with `<id>: <status in a few words>`, and name the card path in it. Then one question and at most one button:
+
+| Stop | `ask` | Button (label → message) |
+| --- | --- | --- |
+| `CLEAN` | `Approve <id>?` | `Approve` → `Approve <id> as carded.` |
+| `FLAG-HUMAN`, every §4 item carries a `Recommendation:` | `Rule on <F#s>?` | `Go with recs` → `Go with your recommendations on <F#s>.` |
+| `FLAG-HUMAN` with any item lacking a recommendation | `Rule on <F#s>?` | none |
+| `NON-CONVERGENT` / stalled / normalizer defect | `How should <id> proceed?` | none |
+
+A button sends the PM's own words, so a click is a chat ruling like a typed one, and 2d says how to record it. Neither button clears the gate, so a misclick cannot ship anything.
+
 ## 1. Plan (read-only, once)
 
 If `WORKBOARD.md` has no real tasks yet, spawn a **planner** (read-only Task) to break the goal into atomic, testable, file-scoped tasks grouped into waves (independent tasks share a wave; dependents go later). The planner **returns** the plan, with a tier on every task; **you** write it into `WORKBOARD.md` (Queue, tier in the `Tier` column), derive `ACCEPTANCE_CRITERIA.md`, and seed `RISKS_AND_BLOCKERS.md` with its risks. The planner never writes workstream files.
@@ -122,9 +150,14 @@ Record every routing decision (and every auto-resolved critical) in `DECISIONS.m
 
 **Suppression is never invisible.** Add one line to the `RUN_LOG.md` round entry: `Suppressed re-raises: F9 (parked R-009, round 4), F20 (rejected, round 2).` The loop declining to act is a routing decision like any other, and it goes on the record — in `RUN_LOG.md`, not `DECISIONS.md`, because nothing was decided.
 
-**On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#` — the only things blocking — fill §1–3 for context with depth linked in §5, link the card from `README.md`, **leave the run marker in place**, and **end the run**. Do not rule on the finding, resolve it, or proceed past it.
+**On any `FLAG-HUMAN: yes`:** this is a **hard stop**. Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`, set `## Status` to `FLAG-HUMAN — AWAITING PM RULING`, fill §4 (Decisions needed) with the flagged finding(s) by `F#` — the only things blocking — each with a `Recommendation:` line, fill §1–3 for context with depth linked in §5, link the card from `README.md`, **leave the run marker in place**, and **end the run** per **the stop protocol**. Do not rule on the finding, resolve it, or proceed past it.
 
-**A `FLAG-HUMAN` is a stop even when it looks already-decided.** If you believe the KICKOFF or `DECISIONS.md` already settles it, do **not** rule and do **not** record a ruling — surface it on the card quoting the exact line that appears to settle it (`appears consistent with KICKOFF: "<quote>" — confirm?`) and stop. A settled decision belongs to its real source (the KICKOFF the PM wrote); never manufacture a fresh "PM ruled `<today>`" event. The loop continues only after the PM's ruling exists in `DECISIONS.md` — written by the PM, not by you — and they re-invoke `/orchestrate <id>`.
+**A `FLAG-HUMAN` is a stop even when it looks already-decided.** If you believe the KICKOFF or `DECISIONS.md` already settles it, do **not** rule and do **not** record a ruling — surface it on the card quoting the exact line that appears to settle it (`appears consistent with KICKOFF: "<quote>" — confirm?`) and stop. A settled decision belongs to its real source (the KICKOFF the PM wrote); never manufacture a fresh "PM ruled `<today>`" event. The loop continues only on a ruling the PM actually gave, in one of two forms:
+
+- **In `DECISIONS.md`.** The PM writes the ruling there and re-invokes `/orchestrate <id>`.
+- **In chat, in this session.** The PM types the ruling or clicks the card's button, which sends their words. Record one `DECISIONS.md` row per `F#` the words cover: the source `PM, chat, <date>`, their words verbatim in quotes, and the option adopted. For a blanket "go with your recommendations," the option adopted is that `F#`'s `Recommendation:` line, quoted from the card. Then **continue the loop in this session from 2d**. Do not restate the card, re-list the recommendations, or ask the PM to confirm what they just said. Restating is not caution; it stalls the run.
+
+Words that don't map to an option don't count as a ruling. That covers an item with no recommendation, an item the PM excluded, or a reply that names no choice ("looks good" on a card with options). Ask once, naming only the uncovered `F#`s. Recording the PM's own words with their source is **not** fabrication. Fabrication is a ruling with no words behind it.
 
 ### 2e. Score confidence
 Combine three signals into a one-line confidence read in the `RUN_LOG.md` round entry:
@@ -146,7 +179,7 @@ Evaluate these rules **in order**; the first that matches decides.
 - `VERDICT == CLEAN` **and** all gates pass → exit to **step 3**.
 - **Run dry** — the round's `Carried: settled` delta is empty, the table holds no new `F#` above `NOTE`, **and the open set holds nothing above `NOTE`** → the review axis has converged; treat as `CLEAN` for loop control and exit to **step 3** if the gates pass.
 - **Stalled** — the `settled` delta is empty and no new `F#` above `NOTE` was raised, but the open set still holds a finding above `NOTE` → this is not convergence. Stop with `## Status: NON-CONVERGENT`, exactly as the round-cap rule below. A stalled loop must never exit as `CLEAN`; `CLEAN` means nothing above `NOTE` is open (`REVIEW_CONTRACT.md` §3).
-- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read + **the per-round `settled / new` progress read**, so the PM can tell a converging run from a stuck one), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop. No clean exit.
+- Round number `>= round_cap` and not `CLEAN` → **non-convergence**: emit the approval card with `## Status: NON-CONVERGENT` (what's unresolved + the confidence read + **the per-round `settled / new` progress read**, so the PM can tell a converging run from a stuck one), write the unresolved findings to `RISKS_AND_BLOCKERS.md`, **leave the run marker in place**, and stop per **the stop protocol**. No clean exit. The stalled and normalizer-defect stops above end the same way.
 - Otherwise → next round (back to 2a: execute fixes, then the next wave).
 
 ## 3. Clean exit — write the card, then HALT
@@ -160,17 +193,17 @@ Copy `docs/execution/templates/APPROVAL_CARD.template.md` to `APPROVAL_CARD.md`,
 3. **How confident** — the 2e read (independent reviewers + coverage + live-check agree? gaps?).
 4. **Findings digest** — auto-fixed criticals one line each (never hidden), warnings/notes parked silently with a count, any remaining `FLAG-HUMAN` front and center.
 
-Then **leave the run marker in place** and **end the run** with one line: `AWAITING PM APPROVAL — <id> on <branch>; card at <path>. Clear the gate when you act: rm .loop-active`. Keep depth one step away (links to `REVIEW.md` / `TEST_RESULTS.md` / `DECISIONS.md`), never the full review in their face. The PM approves **intent/scope and reversibility only** — correctness was delegated to the verification stack (which is why it had to be strong enough to earn a blind sign-off).
+Then **leave the run marker in place** and **end the run** per **the stop protocol**: the stop line `CLEAN — AWAITING PM APPROVAL — <id> on <branch>; card at <path>. Clear the gate when you act: rm .loop-active` prints as text before the recap box. Keep depth one step away (links to `REVIEW.md` / `TEST_RESULTS.md` / `DECISIONS.md`), never the full review in their face. The PM approves **intent/scope and reversibility only** — correctness was delegated to the verification stack (which is why it had to be strong enough to earn a blind sign-off).
 
 ### The human gate — actions the loop NEVER performs
 
 No exceptions — not when everything looks done, not when the answer seems obvious:
 
-- **Never record an approval or ruling as if the PM made it** — not in the card, `DECISIONS.md`, a commit message, or anywhere. An approval is an event only the PM creates; writing one that didn't happen is fabrication.
+- **Never record an approval or ruling as if the PM made it** — not in the card, `DECISIONS.md`, a commit message, or anywhere. An approval is an event only the PM creates; writing one that didn't happen is fabrication. Recording the PM's own chat words, verbatim and sourced (2d), is how a ruling they did make enters the record. That is required, not forbidden.
 - **Never rule on a `FLAG-HUMAN`** (see 2d), even one that looks already-decided.
 - **Never open a PR, request review, or merge.** Outward-facing and human-only.
 
-Opening the PR, merging, and relocating the workstream to `done/` are **the PM's to perform** after approving — by hand, or by explicitly asking in a new instruction. `/orchestrate` does not auto-detect an approval and proceed. The relocation is `./.claude/scripts/close-workstream.sh <id>`: it moves the folder and writes the run record into it: a `## Run record` section in the README (time and tokens), plus `COST.html` when a plan price is configured. The loop never runs it.
+Opening the PR, merging, and relocating the workstream to `done/` are **the PM's to perform** after approving — by hand, or by explicitly asking in a new instruction. `/orchestrate` does not auto-detect an approval and proceed. **When the PM approves a `CLEAN` card in chat** (typed or the `Approve` button), record it in `DECISIONS.md` the same way as a chat ruling (2d): their words verbatim, source `PM, chat, <date>`. Then reply with one line: `Recorded. Clear the gate to ship: rm .loop-active`. Once the gate is clear, the PM can ask for the PR in a new instruction. Don't re-summarize the card. The relocation is `./.claude/scripts/close-workstream.sh <id>`: it moves the folder and writes the run record into it: a `## Run record` section in the README (time and tokens), plus `COST.html` when a plan price is configured. The loop never runs it.
 
 ---
 
@@ -178,13 +211,14 @@ Opening the PR, merging, and relocating the workstream to `done/` are **the PM's
 
 - **You own the workstream files; the planner is read-only.** The planner returns a plan; you record it.
 - **The reviewer assesses; you decide routing.** Never let a review pass authorize or apply its own fix.
-- **Never act as the PM.** `CLEAN` means *ready for the PM*, not *approved*. The loop never records an approval or ruling, never clears a `FLAG-HUMAN`, and never opens a PR or merges. Writing an approval the PM didn't give is fabrication — the worst failure this loop can commit.
+- **Never act as the PM.** `CLEAN` means *ready for the PM*, not *approved*. The loop never records an approval or ruling the PM didn't give, never clears a `FLAG-HUMAN` on its own judgment, and never opens a PR or merges. Writing an approval the PM didn't give is fabrication — the worst failure this loop can commit.
 - **No "done" without evidence** in `TEST_RESULTS.md`. Coverage gate is a gate, not a formality.
 - **Append-only** `RUN_LOG.md` (one entry per round) and `REVIEW.md` (one block per round, written once at the close of the round). Stable `F#` IDs across rounds, assigned against the **whole-file seen-set** — never against the last block alone. **Dedupe against everything seen, not just against what was confirmed:** a finding with a terminal disposition is settled at the severity it was settled at, and does not get re-routed unless the escape hatch fires (2d).
 - **The ledger never reaches a reviewer.** Review passes see the round's diff; the seen-set enters at normalization and the resume replay is read by you, the orchestrator. Feeding prior findings into a pass would trade a cheap re-litigation for a correlated blind spot.
 - **Factual only** — no invented owners, dates, or test counts (guide / workstream conventions).
 - **Bounded delegation** — pass executors only their file scope + contracts + expected output, never the full conversation.
 - **The session log belongs to the hook.** `record-workstream-session.sh` appends each session that writes to the workstream to `.git/loop-sessions/<id>.log`; the run record covers exactly that list. Never edit, rewrite or delete it.
+- **Every hard stop prints its stop line as text** before any end-of-turn tool call (the stop protocol). A run that ends with no card path on screen has not finished.
 - **Every spawn names its model** (Model routing). No Task inherits the session's model by omission, and no reviewer runs on a cheaper model than the code it reviews.
 
 ## Per-repo specifics
