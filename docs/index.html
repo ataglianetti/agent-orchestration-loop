@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Orchestration Loop</title>
+<meta name="description" content="An autonomous, resumable plan → execute → verify → review loop for Claude Code that stops at a human approval card and cannot open a PR, merge, or record an approval on its own.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%23C45B4D' stroke-width='4'/%3E%3Ccircle cx='16' cy='5' r='4' fill='%231A1A1A'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #FAF8F5;
+  --surface: #FFFFFF;
+  --surface-2: #F2EFEA;
+  --ink: #1A1A1A;
+  --ink-2: #4A4A4A;
+  --muted: #6E6E6E;
+  --line: #E2DED7;
+  --accent: #B04A3C;
+  --accent-soft: #F6E3DF;
+  --code-bg: #1A1A1A;
+  --code-ink: #F2EFEA;
+  --code-dim: #9A9690;
+  --shadow: 0 1px 2px rgba(26,26,26,.04), 0 4px 16px rgba(26,26,26,.04);
+  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141414;
+    --surface: #1C1C1C;
+    --surface-2: #232323;
+    --ink: #EDEAE5;
+    --ink-2: #C7C3BD;
+    --muted: #9A9690;
+    --line: #2E2E2E;
+    --accent: #E07A6B;
+    --accent-soft: #3A2320;
+    --code-bg: #0E0E0E;
+    --code-ink: #EDEAE5;
+    --code-dim: #8A8680;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141414;
+  --surface: #1C1C1C;
+  --surface-2: #232323;
+  --ink: #EDEAE5;
+  --ink-2: #C7C3BD;
+  --muted: #9A9690;
+  --line: #2E2E2E;
+  --accent: #E07A6B;
+  --accent-soft: #3A2320;
+  --code-bg: #0E0E0E;
+  --code-ink: #EDEAE5;
+  --code-dim: #8A8680;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+code, kbd { font-family: var(--mono); font-size: .88em; }
+:not(pre) > code {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .05em .35em;
+  overflow-wrap: anywhere;
+}
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 720px) { .wrap { padding: 0 32px; } }
+
+/* top bar */
+.top {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  position: sticky; top: 0; z-index: 10;
+}
+.top .wrap { display: flex; align-items: center; gap: 24px; height: 56px; }
+.brand { font-weight: 650; letter-spacing: -.01em; color: var(--ink); text-decoration: none; white-space: nowrap; }
+.brand span { color: var(--accent); }
+.top nav { display: flex; gap: 20px; margin-left: auto; font-size: 14px; }
+.top nav a { color: var(--ink-2); text-decoration: none; }
+.top nav a:hover { color: var(--ink); }
+@media (max-width: 640px) {
+  .top nav a.opt { display: none; }
+  .top nav { gap: 14px; }
+  body .term { padding-top: 40px; padding-right: 18px; }
+}
+@media (max-width: 420px) {
+  .brand { font-size: 14px; }
+  .top nav a.opt2 { display: none; }
+}
+
+/* hero */
+.hero { padding-top: 72px; padding-bottom: 56px; }
+.eyebrow {
+  font: 600 12px/1 var(--mono);
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 0 18px;
+}
+h1 {
+  font-size: clamp(34px, 6vw, 60px);
+  line-height: 1.04;
+  letter-spacing: -.03em;
+  margin: 0 0 20px;
+  max-width: 15ch;
+}
+.lede { font-size: clamp(17px, 2.2vw, 20px); color: var(--ink-2); max-width: 62ch; margin: 0 0 32px; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 28px 0 0; padding: 0; list-style: none; font-size: 14px; color: var(--muted); }
+.facts b { color: var(--ink); font-weight: 600; }
+
+/* code block */
+.term {
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border-radius: 10px;
+  padding: 16px 52px 16px 18px;
+  font: 14px/1.7 var(--mono);
+  position: relative;
+  max-width: 720px;
+  overflow-x: auto;
+}
+.term .p { color: var(--code-dim); user-select: none; }
+.term .c { color: var(--code-dim); }
+.term pre { margin: 0; white-space: pre; }
+.copy {
+  position: absolute; top: 10px; right: 10px;
+  background: transparent; color: var(--code-dim);
+  border: 1px solid #3A3A3A; border-radius: 6px;
+  font: 12px var(--mono); padding: 4px 8px; cursor: pointer;
+}
+.copy:hover { color: var(--code-ink); border-color: #5A5A5A; }
+
+/* sections */
+section { padding: 64px 0; border-top: 1px solid var(--line); }
+.sec-head { display: grid; gap: 10px; margin-bottom: 36px; max-width: 70ch; }
+.num { font: 600 12px/1 var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+h2 { font-size: clamp(26px, 3.6vw, 36px); line-height: 1.15; letter-spacing: -.02em; margin: 0; }
+.sec-head p { margin: 0; color: var(--ink-2); font-size: 17px; }
+h3 { font-size: 17px; margin: 0 0 6px; letter-spacing: -.005em; }
+
+/* loop diagram */
+.flow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) minmax(0, 1.25fr);
+  gap: 10px;
+  align-items: stretch;
+}
+.step {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px 14px 16px;
+  box-shadow: var(--shadow);
+  position: relative;
+}
+.step .k { font: 600 11px/1 var(--mono); letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+.step .n { font-weight: 650; font-size: 17px; margin: 8px 0 4px; }
+.step p { margin: 0; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.step.stop { background: var(--accent-soft); border-color: transparent; }
+.step.stop .k { color: var(--accent); }
+.loopback {
+  grid-column: 1 / 6;
+  border: 1.5px dashed var(--line);
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  height: 22px;
+  margin: -4px 8% 0;
+  position: relative;
+}
+.loopback span {
+  position: absolute; left: 50%; bottom: -10px; transform: translateX(-50%);
+  background: var(--bg); padding: 0 10px;
+  font: 12px var(--mono); color: var(--muted); white-space: nowrap;
+}
+@media (max-width: 860px) {
+  .flow { grid-template-columns: 1fr 1fr; }
+  .step.stop { grid-column: 1 / -1; }
+  .loopback { display: none; }
+}
+.stops { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 44px; }
+.stops div { border-left: 2px solid var(--accent); padding: 2px 0 2px 14px; }
+.stops code { font-weight: 600; }
+.stops p { margin: 6px 0 0; font-size: 14.5px; color: var(--ink-2); }
+@media (max-width: 760px) { .stops { grid-template-columns: 1fr; } }
+
+/* catalog controls */
+.controls { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; margin-bottom: 24px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  font: 500 13px/1 var(--sans);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.chip .ct { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-left: 4px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.chip[aria-pressed="true"] .ct { color: var(--bg); opacity: .7; }
+.search {
+  flex: 1 1 220px;
+  max-width: 320px;
+  font: 14px var(--sans);
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+.search:focus, .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.count { font: 13px var(--mono); color: var(--muted); margin: 0 0 14px; }
+
+/* catalog grid */
+.stage-group { margin-bottom: 36px; }
+.stage-group[hidden] { display: none; }
+.stage-title { display: flex; align-items: baseline; gap: 12px; margin: 0 0 12px; }
+.stage-title h3 { font-size: 15px; margin: 0; text-transform: uppercase; letter-spacing: .08em; font-family: var(--mono); }
+.stage-title p { margin: 0; font-size: 14px; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+@media (max-width: 400px) { .grid { grid-template-columns: 1fr; } }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 16px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+  box-shadow: var(--shadow);
+}
+.card[hidden] { display: none; }
+.card-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.card .name { font: 600 14.5px/1.35 var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+.kind {
+  font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent); background: var(--accent-soft);
+  padding: 4px 6px; border-radius: 4px; white-space: nowrap;
+}
+.card .desc { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
+.card .when { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+.card .when b { color: var(--ink-2); font-weight: 600; }
+.card .src { margin-top: auto; padding-top: 6px; font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+.card .src a { color: var(--muted); text-decoration: none; }
+.card .src a:hover { color: var(--accent); text-decoration: underline; }
+.empty { color: var(--muted); font-size: 15px; }
+
+/* differentiators */
+.why { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 760px) { .why { grid-template-columns: 1fr; } }
+.why article {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 22px 22px 20px;
+  box-shadow: var(--shadow);
+}
+.why .tag { font: 600 11px/1 var(--mono); letter-spacing: .1em; color: var(--accent); text-transform: uppercase; margin-bottom: 10px; display: block; }
+.why h3 { font-size: 19px; margin-bottom: 8px; }
+.why p { margin: 0 0 10px; color: var(--ink-2); font-size: 15px; }
+.why p:last-child { margin-bottom: 0; }
+.why .src { font: 12px var(--mono); color: var(--muted); }
+.why .src a { color: var(--muted); }
+
+/* install */
+.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; gap: 28px; max-width: 760px; }
+.steps > li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 0 14px; }
+.steps > li::before {
+  content: counter(s);
+  font: 600 13px/30px var(--mono);
+  width: 30px; height: 30px; text-align: center;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--accent);
+}
+.steps h3 { margin: 4px 0 6px; }
+.steps p { margin: 0 0 12px; color: var(--ink-2); font-size: 15px; }
+.steps .term { margin-top: 4px; }
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 48px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.panel { border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; background: var(--surface); }
+.panel ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 15px; }
+.panel li { margin: 5px 0; }
+.panel p { margin: 6px 0 0; color: var(--ink-2); font-size: 15px; }
+table.lock { width: 100%; border-collapse: collapse; font-size: 14.5px; margin-top: 10px; }
+table.lock th, table.lock td { text-align: left; vertical-align: top; padding: 9px 10px 9px 0; border-top: 1px solid var(--line); }
+table.lock th { font: 600 11px/1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border-top: none; }
+table.lock td:first-child { font-weight: 600; white-space: nowrap; }
+.table-scroll { overflow-x: auto; }
+
+footer { border-top: 1px solid var(--line); padding: 40px 0 56px; color: var(--muted); font-size: 14px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 32px; justify-content: space-between; }
+footer p { margin: 0; max-width: 62ch; }
+footer a { color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">agent-orchestration-<span>loop</span></a>
+    <nav>
+      <a class="opt" href="#loop">The loop</a>
+      <a href="#catalog">Catalog</a>
+      <a class="opt" href="#why">Why</a>
+      <a class="opt2" href="#install">Install</a>
+      <a href="https://github.com/ataglianetti/agent-orchestration-loop">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap hero">
+  <p class="eyebrow">For Claude Code · MIT licensed</p>
+  <h1>A build loop that stops and waits for you.</h1>
+  <p class="lede">One command runs plan → execute → verify → review → route, round after round, until an adversarial review comes back clean or a round cap trips. Then it writes an approval card and stops. It fixes routine review findings on its own, escalates only what a human has to decide, and cannot open a PR, merge, or record an approval while it runs.</p>
+  <div class="term" id="hero-install">
+    <pre><span class="p">$ </span>git clone https://github.com/ataglianetti/agent-orchestration-loop.git
+<span class="p">$ </span>agent-orchestration-loop/install.sh /path/to/your-repo</pre>
+    <button class="copy" data-copy="git clone https://github.com/ataglianetti/agent-orchestration-loop.git&#10;agent-orchestration-loop/install.sh /path/to/your-repo">copy</button>
+  </div>
+  <ul class="facts">
+    <li><b>33</b> pieces across <b>9</b> stages</li>
+    <li>State on disk, resumable across sessions</li>
+    <li>Human gate enforced by a hook</li>
+  </ul>
+</div>
+
+<section id="loop">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="num">01 · The loop</span>
+      <h2>One round, repeated until review is clean.</h2>
+      <p>Run <code>/orchestrate &lt;workstream-id&gt;</code> with a goal inline or a path to a spec. State lives in <code>docs/execution/active/&lt;id&gt;/</code>, so re-running the command picks up where the last session stopped.</p>
+    </div>
+
+    <div class="flow" aria-label="Loop stages">
+      <div class="step"><div class="k">once</div><div class="n">Plan</div><p>A read-only planner splits the goal into file-scoped tasks in parallel waves, each tagged with a tier.</p></div>
+      <div class="step"><div class="k">step a</div><div class="n">Execute</div><p>Executors work a wave under bounded contracts. One atomic commit per task.</p></div>
+      <div class="step"><div class="k">step b</div><div class="n">Verify</div><p>A coverage gate, then a live check against the real build or endpoint.</p></div>
+      <div class="step"><div class="k">step c</div><div class="n">Review</div><p>1 to 3 independent passes, sized to the diff's blast radius.</p></div>
+      <div class="step"><div class="k">step d–f</div><div class="n">Route</div><p>Fix, park or escalate by severity. Score confidence. Decide whether to loop.</p></div>
+      <div class="step stop"><div class="k">hard stop</div><div class="n">Approval card</div><p>Intent, reversibility, confidence, and anything only you can rule on. The loop ends here.</p></div>
+      <div class="loopback"><span>next round, up to round_cap (default 5)</span></div>
+    </div>
+
+    <div class="stops">
+      <div><code>CLEAN</code><p>Verification passed and nothing above <code>NOTE</code> is open. Read the card; if it's right, you open the PR.</p></div>
+      <div><code>FLAG-HUMAN</code><p>A scope, money, contract or security-posture call. Rule in chat or in <code>DECISIONS.md</code>; your words are recorded verbatim and the loop continues.</p></div>
+      <div><code>NON-CONVERGENT</code><p>The round cap tripped, or the run stalled. The card shows settled vs. new findings per round so you can tell stuck from slow.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="catalog">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="num">02 · The catalog</span>
+      <h2>Every piece, grouped by the stage it serves.</h2>
+      <p>Commands, the planner agent, hooks, scripts, templates and the rules inside <code>/orchestrate</code>. Each card links the file it comes from.</p>
+    </div>
+
+    <div class="controls">
+      <div class="chips" role="group" aria-label="Filter by stage" id="chips"></div>
+      <input class="search" id="search" type="search" placeholder="Search: guard, ledger, cost…" aria-label="Search the catalog">
+    </div>
+    <p class="count" id="count" aria-live="polite"></p>
+
+    <div id="groups">
+
+      <div class="stage-group" data-stage="setup">
+        <div class="stage-title"><h3>Setup</h3><p>Once per repo</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">install.sh</span><span class="kind">script</span></div>
+            <p class="desc">Copies the commands, planner, scripts and templates into a repo, and merges the guard and session-recorder hooks into <code>.claude/settings.json</code> without overwriting what's there.</p>
+            <p class="when"><b>Also:</b> checks for the three review skills the loop calls and names any it can't see. It never fails the install over them.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/install.sh">install.sh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Orchestration guide</span><span class="kind">rulebook</span></div>
+            <p class="desc">The repo's own rules, read at the start of every run. You fill four sections: contracts (§1), test and smoke commands (§5), guardrails (§6), execution order (§7).</p>
+            <p class="when"><b>Reach for it:</b> right after install. An existing guide is never overwritten.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/ORCHESTRATION_GUIDE.md">execution/ORCHESTRATION_GUIDE.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">/orchestrate</span><span class="kind">command</span></div>
+            <p class="desc">The loop. Creates or resumes a workstream, then runs rounds until review is clean, a human call comes up, or the round cap trips.</p>
+            <p class="when"><b>Reach for it:</b> a goal that spans more than one commit or session.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md">commands/orchestrate.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">init-workstream.sh</span><span class="kind">script</span></div>
+            <p class="desc">Scaffolds <code>docs/execution/active/&lt;id&gt;/</code> from the templates, with a README holding the run's Loop Config: round cap, posture, a model per tier, an optional ticket and plan price.</p>
+            <p class="when"><b>Reach for it:</b> <code>/orchestrate</code> runs it for a new id. Run it yourself to set Loop Config before round one.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/init-workstream.sh">scripts/init-workstream.sh</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="plan">
+        <div class="stage-title"><h3>Plan</h3><p>Round one</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">planner</span><span class="kind">agent</span></div>
+            <p class="desc">Read-only. Breaks the goal into atomic, testable, file-scoped tasks, groups them into waves, and tags each <code>mechanical</code>, <code>standard</code> or <code>hard</code>. It returns the plan and never writes a file.</p>
+            <p class="when"><b>Also:</b> takes a spec or notes file as the goal and follows its frontmatter links only to bound scope, never to widen it.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/agents/planner.md">agents/planner.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Model routing</span><span class="kind">rule</span></div>
+            <p class="desc">Every subagent spawn names its model, chosen by task tier. Defaults: planner, hard tasks and the adversarial pass on <code>opus</code>; mechanical and standard tasks, the live check and lighter review passes on <code>sonnet</code>.</p>
+            <p class="when"><b>Reach for it:</b> override any default with a <code>model_*</code> key in Loop Config.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#model-routing--every-spawn-names-its-model">orchestrate.md · Model routing</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">WORKBOARD · ACCEPTANCE_CRITERIA</span><span class="kind">template</span></div>
+            <p class="desc">The task board (in progress, queue with a tier column, blocked, done) and done conditions per chunk. The orchestrator writes both from the planner's output.</p>
+            <p class="when"><b>Reach for it:</b> to see where a run is without reading the transcript.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/execution/templates">execution/templates/</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">RISKS_AND_BLOCKERS</span><span class="kind">template</span></div>
+            <p class="desc">The risk register. Seeded from the planner's risks; every parked finding gets an <code>R-###</code> row here; a non-convergent run writes its unresolved findings here.</p>
+            <p class="when"><b>Reach for it:</b> after a <code>NON-CONVERGENT</code> stop, to decide retry, narrow or hand off.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/RISKS_AND_BLOCKERS.template.md">RISKS_AND_BLOCKERS.template.md</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="execute">
+        <div class="stage-title"><h3>Execute</h3><p>Step a, each round</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">Subagent task contract</span><span class="kind">template</span></div>
+            <p class="desc">The brief each executor gets: objective, files it may edit, what's out of scope, constraints, validation command, model, return format. Never the full conversation.</p>
+            <p class="when"><b>Rule:</b> tasks run in parallel only when their write scopes don't overlap.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/SUBAGENT_TASK.template.md">SUBAGENT_TASK.template.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Tier escalation</span><span class="kind">rule</span></div>
+            <p class="desc">A task that fails its validation twice, or draws a <code>CRITICAL</code>, gets its fix one tier up instead of another try at the same tier. A third failure at <code>hard</code> becomes a finding.</p>
+            <p class="when"><b>Rule:</b> the orchestrator can raise a tier and log why. It never lowers one.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#model-routing--every-spawn-names-its-model">orchestrate.md · Model routing, rule 2</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">DECISIONS</span><span class="kind">template</span></div>
+            <p class="desc">Every routing call, every answer to an executor's "your call?" question, and every human ruling, which goes in verbatim with its source and date.</p>
+            <p class="when"><b>Reach for it:</b> to rule on a <code>FLAG-HUMAN</code> outside chat, then re-run <code>/orchestrate &lt;id&gt;</code>.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/DECISIONS.template.md">DECISIONS.template.md</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="verify">
+        <div class="stage-title"><h3>Verify</h3><p>Step b, each round</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">Coverage gate</span><span class="kind">gate</span></div>
+            <p class="desc">A test has to exercise this change and pass. No test for the new path counts as a fail, and a failed gate can't reach a clean exit.</p>
+            <p class="when"><b>Feeds:</b> the confidence read and the card's "How confident" section.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2b-verify--the-gates-your-eyes-not-the-pms">orchestrate.md · 2b</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Live check</span><span class="kind">gate</span></div>
+            <p class="desc">Runs the real build or endpoint through the <code>run</code> skill, in its own verify task, so browser and shell output stay out of the orchestrator's context. Returns pass/fail per check and a repro for any failure.</p>
+            <p class="when"><b>Needs:</b> the smoke commands named in guide §5.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2b-verify--the-gates-your-eyes-not-the-pms">orchestrate.md · 2b</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">TEST_PLAN · TEST_RESULTS</span><span class="kind">template</span></div>
+            <p class="desc">What will be validated (unit, integration, manual smoke) and what actually ran (automated, manual, and gaps with the reason a test couldn't run).</p>
+            <p class="when"><b>Rule:</b> no "done" without evidence here.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/execution/templates">execution/templates/</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="review">
+        <div class="stage-title"><h3>Review</h3><p>Step c, each round</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">Blast-radius ladder</span><span class="kind">rule</span></div>
+            <p class="desc">One pass for a small additive diff, two for one subsystem, three for cross-cutting work. Touching a guardrail, API contract or security surface forces all three: <code>adversarial-reviewer</code>, <code>run</code>, <code>code-review</code>.</p>
+            <p class="when"><b>Rule:</b> passes see only the round's diff and never each other's findings. A borderline or critical finding adds a pass.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2c-review--independent-personas-depth-scaled-to-blast-radius">orchestrate.md · 2c</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">REVIEW_CONTRACT</span><span class="kind">contract</span></div>
+            <p class="desc">Fixed tokens for severity, reachability, <code>FLAG-HUMAN</code>, disposition and verdict, and the rules for merging raw passes into one block. Routing keys off the tokens, not the reviewers' prose.</p>
+            <p class="when"><b>Rule:</b> reviewers assess. The orchestrator decides what happens.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/REVIEW_CONTRACT.md">execution/REVIEW_CONTRACT.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Findings ledger</span><span class="kind">rule</span></div>
+            <p class="desc">Stable <code>F#</code> IDs across rounds in an append-only <code>REVIEW.md</code>. A settled finding that resurfaces is suppressed, unless its severity rose, it went live, the diff touched its code, or every pass raised it again.</p>
+            <p class="when"><b>Why:</b> so the round cap isn't spent re-arguing calls already made.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/REVIEW_CONTRACT.md#5-normalization-raw-passes--one-verdict-block">REVIEW_CONTRACT.md · §5</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="route">
+        <div class="stage-title"><h3>Route &amp; stop</h3><p>Steps d–f, and the card</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">Severity routing</span><span class="kind">rule</span></div>
+            <p class="desc">Live criticals get fixed this round and re-reviewed. Dormant ones are fixed if cheap or parked behind their flag. Warnings are fixed if cheap; trivial notes are auto-fixed. Any <code>FLAG-HUMAN</code> is a hard stop.</p>
+            <p class="when"><b>Rule:</b> a fixed critical isn't resolved until a fresh review pass confirms it.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2d-route--your-severityaction-policy-you-own-this-the-reviewer-only-assessed">orchestrate.md · 2d</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Confidence read</span><span class="kind">rule</span></div>
+            <p class="desc">Review consensus, the coverage gate and the live check, combined into one line per round. Low and reversible runs another verification round; low and consequential escalates.</p>
+            <p class="when"><b>Optional:</b> <code>escalate_to_engineer: on</code> pauses for a code owner's PR review instead of landing on you.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2e-score-confidence">orchestrate.md · 2e</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">APPROVAL_CARD</span><span class="kind">template</span></div>
+            <p class="desc">What you sign: what you asked for against what it built, how reversible it is with the revert path, how confident the stack is, and any decision only you can make, each with a recommendation.</p>
+            <p class="when"><b>Rule:</b> the loop never writes "APPROVED". That block is yours.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/APPROVAL_CARD.template.md">APPROVAL_CARD.template.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">Stop protocol</span><span class="kind">rule</span></div>
+            <p class="desc">Every hard stop prints one line with the status, branch and card path. In the Claude desktop app the run shows as waiting on you, and where a one-click answer fits, an Approve or "Go with recs" button sends your words as the ruling.</p>
+            <p class="when"><b>Optional:</b> the app pieces. The CLI runs the same loop without them.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#the-stop-protocol--every-hard-stop-ends-this-way">orchestrate.md · Stop protocol</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="gate">
+        <div class="stage-title"><h3>Gate</h3><p>Holds for the whole run</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">block-human-gated-actions.sh</span><span class="kind">hook</span></div>
+            <p class="desc">PreToolUse guard. While a run is active it blocks opening, merging and approving PRs, <code>git push</code>, and the routes around them: aliases, <code>gh api</code> writes, branch-protection changes, authenticated raw HTTP, reading the GitHub token.</p>
+            <p class="when"><b>Limit:</b> it matches text. Branch protection on the remote is the backstop.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/block-human-gated-actions.sh">scripts/block-human-gated-actions.sh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">.loop-active · ungate</span><span class="kind">marker</span></div>
+            <p class="desc">The soft marker. The loop writes it at the repo root and can't remove it; the guard walls every removal path it knows. You clear it from your own terminal with <code>rm</code>, or <code>ungate</code>, which also finds markers in other worktrees.</p>
+            <p class="when"><b>Opt-in:</b> source <code>loop-gate.zsh</code> from your shell rc. The installer never touches it.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/loop-gate.zsh">scripts/loop-gate.zsh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">lock-loop.sh · unlock-loop.sh</span><span class="kind">script</span></div>
+            <p class="desc">The hard lock. One <code>sudo</code> drops a root-owned marker outside the repo and freezes <code>.claude/</code> (except <code>worktrees/</code>), so the hook can't be unwired from inside. One <code>sudo</code> lifts it.</p>
+            <p class="when"><b>Reach for it:</b> unattended runs on a repo where a rogue ship would reach something real.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/lock-loop.sh">scripts/lock-loop.sh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">loop-status.sh</span><span class="kind">script</span></div>
+            <p class="desc">Read-only report of which marker, if any, holds the gate for this checkout, plus soft markers in other worktrees and any worktree the hard lock left unfrozen.</p>
+            <p class="when"><b>Used by:</b> <code>/orchestrate</code>, before it writes its own marker. And you, before locking or unlocking.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/loop-status.sh">scripts/loop-status.sh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">scripts/tests/</span><span class="kind">tests</span></div>
+            <p class="desc">Five suites that run without root (the guard, denial-message safety, the hard marker, <code>ungate</code>, the cost record) and one smoke test that sets real immutable flags under <code>sudo</code>.</p>
+            <p class="when"><b>Notable:</b> the denial suite runs every command a block message suggests and checks that none clears the gate.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/scripts/tests">scripts/tests/</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">KNOWN-GATE-ISSUES</span><span class="kind">log</span></div>
+            <p class="desc">A public defect log for the gate. Twelve found by independent review of the shipped scripts, each fixed in a linked PR; none open.</p>
+            <p class="when"><b>Reach for it:</b> before trusting the gate on something that matters.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/docs/KNOWN-GATE-ISSUES.md">docs/KNOWN-GATE-ISSUES.md</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="close">
+        <div class="stage-title"><h3>Close</h3><p>After you merge</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">record-workstream-session.sh</span><span class="kind">hook</span></div>
+            <p class="desc">PostToolUse hook that notes each session that writes to a workstream, in <code>.git/loop-sessions/&lt;id&gt;.log</code>, so a run in a worktree is still on record after the worktree is gone.</p>
+            <p class="when"><b>Rule:</b> the log belongs to the hook. The loop never edits it.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/record-workstream-session.sh">scripts/record-workstream-session.sh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">close-workstream.sh</span><span class="kind">script</span></div>
+            <p class="desc">Your step. Moves the workstream to <code>done/</code> and writes a dollar-free Run record into its README: ticket, calendar, active and attended time, sessions, tokens, models, rounds.</p>
+            <p class="when"><b>Reach for it:</b> soon after the work ends. Claude Code can delete old session transcripts.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/close-workstream.sh">scripts/close-workstream.sh</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">workstream-cost/</span><span class="kind">script</span></div>
+            <p class="desc">With <code>plan_price</code> in Loop Config (or <code>WORKSTREAM_PLAN_PRICE</code> in your shell), close also writes <code>COST.html</code>: the run's tokens at live Claude API list prices, next to the flat fee you paid.</p>
+            <p class="when"><b>Default:</b> off. The installer gitignores <code>COST.html</code> and <code>cost.json</code>.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/scripts/workstream-cost">scripts/workstream-cost/</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">RUN_LOG</span><span class="kind">template</span></div>
+            <p class="desc">Append-only, one entry per round: what ran, which model each task used and why, the confidence read, and any re-raised findings it suppressed.</p>
+            <p class="when"><b>Why:</b> a cost review can't tell a cheap model that worked from one that forced a rerun without it.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/RUN_LOG.template.md">RUN_LOG.template.md</a></p>
+          </article>
+        </div>
+      </div>
+
+      <div class="stage-group" data-stage="validate">
+        <div class="stage-title"><h3>Validate</h3><p>When done means "after real use"</p></div>
+        <div class="grid">
+          <article class="card">
+            <div class="card-top"><span class="name">VERDICT_HARNESS</span><span class="kind">template</span></div>
+            <p class="desc">For work whose real test is a keep/kill/extend call after a dogfood or pilot. Criteria tallies, a usage log, evidence logs, a safety log, a friction list, and the verdict you write at the deadline.</p>
+            <p class="when"><b>Rule:</b> the loop builds the surfaces and scaffolds this. The verdict is yours.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/VERDICT_HARNESS.template.md">VERDICT_HARNESS.template.md</a></p>
+          </article>
+          <article class="card">
+            <div class="card-top"><span class="name">/dogfood</span><span class="kind">command</span></div>
+            <p class="desc">One-line friction capture into the harness, with one short question when a report is too vague to fix cold. <code>/dogfood reconcile</code> fills the Resolved column from merged PRs.</p>
+            <p class="when"><b>Join key:</b> a fix PR names its entry as <code>friction: &lt;date&gt; &lt;slug&gt;</code>.</p>
+            <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/dogfood.md">commands/dogfood.md</a></p>
+          </article>
+        </div>
+      </div>
+
+      <p class="empty" id="empty" hidden>Nothing matches. Try "hook", "marker" or "review".</p>
+    </div>
+  </div>
+</section>
+
+<section id="why">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="num">03 · What's different</span>
+      <h2>Built around the run that shipped itself.</h2>
+      <p>The first time this loop ran for real, it reached a clean review, approved its own work and opened a PR. It had been told never to do that. The mechanical gate exists because of that run.</p>
+    </div>
+    <div class="why">
+      <article>
+        <span class="tag">The gate</span>
+        <h3>It can't ship on its own.</h3>
+        <p>Prose instructions have a ceiling: an agent trying to finish will reason its way past them. So a hook blocks the shipping commands while a run is active, and the marker that turns the hook on is one the loop is walled off from removing.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop#the-human-gate--why-its-mechanical-not-just-instructions">README · The human gate</a></p>
+      </article>
+      <article>
+        <span class="tag">Honest limits</span>
+        <h3>It tells you where the guard stops.</h3>
+        <p>The guard matches text, so a command that assembles its words at runtime can get past it. The README says so and names the backstop: branch protection that requires a pull request and an approving review from someone other than the author. The hard lock goes further and puts the marker and the repo's hook wiring out of the agent's reach. It also names what the lock leaves open, starting with user-level <code>~/.claude/settings.json</code>.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop#the-marker-the-gate-reads--soft-by-default-hard-when-it-matters">README · Soft and hard markers</a></p>
+      </article>
+      <article>
+        <span class="tag">Your job</span>
+        <h3>You sign off on two things.</h3>
+        <p>Intent and scope: is this what you asked for? Reversibility: if it's wrong, how bad and how recoverable? Correctness goes to the verification stack (independent reviewers, a coverage gate, a live check), which is why that stack has to be strong enough to earn a sign-off without reading the diff.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/APPROVAL_CARD.template.md">APPROVAL_CARD.template.md</a></p>
+      </article>
+      <article>
+        <span class="tag">Convergence</span>
+        <h3>Settled findings stay settled.</h3>
+        <p>Without a ledger, a parked finding the reviewer keeps rediscovering gets re-routed every round until the cap runs out. Stable IDs and a whole-file seen-set stop that. The matcher can overrule one reviewer's memory, never all of them at once.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/REVIEW_CONTRACT.md">REVIEW_CONTRACT.md</a></p>
+      </article>
+      <article>
+        <span class="tag">Cost</span>
+        <h3>Cheap models do cheap work, never cheap review.</h3>
+        <p>A subagent spawned without a model runs on the session's model, so a one-line rename would run on the most expensive one available. Here the planner tiers every task, and if any task in a round ran on the hard-tier model, every review pass that round does too.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#model-routing--every-spawn-names-its-model">orchestrate.md · Model routing</a></p>
+      </article>
+      <article>
+        <span class="tag">Audit trail</span>
+        <h3>Everything lands on disk.</h3>
+        <p>The workstream folder is the run's memory and its paper trail: the card up front, then review rounds, decisions, test results and the run log. Close it and the README gains a record of time, tokens, models and rounds.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop#using-it">README · Using it</a></p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="num">04 · Install</span>
+      <h2>Three steps to a first run.</h2>
+      <p>Built for Claude Code, in the CLI or the desktop app. The guard and the session recorder are Claude Code hooks wired in <code>.claude/settings.json</code>.</p>
+    </div>
+
+    <ol class="steps">
+      <li>
+        <div>
+          <h3>Install into your repo</h3>
+          <p>Drops the commands, planner and scripts into <code>.claude/</code>, the templates into <code>docs/execution/</code>, adds <code>.loop-active</code> to <code>.gitignore</code>, and merges both hooks into your settings.</p>
+          <div class="term">
+            <pre><span class="p">$ </span>git clone https://github.com/ataglianetti/agent-orchestration-loop.git
+<span class="p">$ </span>agent-orchestration-loop/install.sh /path/to/your-repo</pre>
+            <button class="copy" data-copy="git clone https://github.com/ataglianetti/agent-orchestration-loop.git&#10;agent-orchestration-loop/install.sh /path/to/your-repo">copy</button>
+          </div>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Specialize the guide</h3>
+          <p>Fill §1 (contracts), §5 (the exact test and smoke commands), §6 (guardrails) and §7 (execution order) in <code>docs/execution/CLAUDE_ORCHESTRATION_GUIDE.md</code>. The live check and reachability calls depend on them.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <h3>Hand off a goal</h3>
+          <p>In a Claude Code session rooted at the repo. Give the goal inline or point it at a spec file, then walk away until it stops.</p>
+          <div class="term">
+            <pre><span class="p">&gt; </span>/orchestrate my-first-workstream</pre>
+            <button class="copy" data-copy="/orchestrate my-first-workstream">copy</button>
+          </div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="two">
+      <div class="panel">
+        <h3>Requirements</h3>
+        <ul>
+          <li>Claude Code, <code>git</code>, and <code>jq</code> (for the settings merge and the guard's JSON output).</li>
+          <li>The <code>adversarial-reviewer</code>, <code>run</code> and <code>code-review</code> skills. They aren't shipped here; they come bundled with most Claude Code builds or from a plugin. Without them the loop plans and executes, then stalls at review.</li>
+          <li>For the hard lock: <code>sudo</code>, and <code>chflags</code> (macOS) or <code>chattr</code> (Linux).</li>
+          <li>Recommended on any repo an unattended run could reach: branch protection on the default branch that requires a pull request and an approving review from someone other than the author.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>When the run stops</h3>
+        <p>Read <code>APPROVAL_CARD.md</code>, not the diff. Approve or rule in chat and your words are recorded verbatim. Then clear the gate from your own terminal and open the PR yourself.</p>
+        <div class="term" style="margin-top:14px">
+          <pre><span class="p">$ </span>rm .loop-active   <span class="c"># or: ungate</span>
+<span class="p">$ </span>./.claude/scripts/close-workstream.sh &lt;id&gt;   <span class="c"># after merge</span></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px">
+      <h3>Soft or hard gate?</h3>
+      <div class="table-scroll">
+        <table class="lock">
+          <thead><tr><th>Gate</th><th>Who can clear it</th><th>Use it for</th></tr></thead>
+          <tbody>
+            <tr><td>Soft (default)</td><td><code>.loop-active</code> at the repo root. You, with <code>rm</code> or <code>ungate</code>. The guard blocks the loop's known removal paths.</td><td>Supervised runs, throwaway branches, repos whose branch protection already gates merges.</td></tr>
+            <tr><td>Hard (opt-in)</td><td>A root-owned marker outside the repo, plus a frozen <code>.claude/</code>. Only <code>sudo unlock-loop.sh</code>.</td><td>Solo repos with no downstream review, unattended or overnight runs, direct-to-main.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="term" style="margin-top:14px">
+        <pre><span class="p">$ </span>sudo ./.claude/scripts/lock-loop.sh     <span class="c"># before /orchestrate</span>
+<span class="p">$ </span>sudo ./.claude/scripts/unlock-loop.sh   <span class="c"># after you act on the card</span></pre>
+      </div>
+      <p style="margin-top:12px">While locked, "Allow always" on a permission prompt fails, because Claude Code writes that grant into the frozen <code>.claude/</code>. Choose "Allow once".</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Built by <a href="https://github.com/ataglianetti">@ataglianetti</a>. MIT licensed. The gate got harder because people took it apart in public; credits are in the <a href="https://github.com/ataglianetti/agent-orchestration-loop#acknowledgements">README's acknowledgements</a>.</p>
+    <p><a href="https://github.com/ataglianetti/agent-orchestration-loop">Source on GitHub</a></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var stages = [
+    ['all', 'All'], ['setup', 'Setup'], ['plan', 'Plan'], ['execute', 'Execute'], ['verify', 'Verify'],
+    ['review', 'Review'], ['route', 'Route & stop'], ['gate', 'Gate'], ['close', 'Close'], ['validate', 'Validate']
+  ];
+  var groups = Array.prototype.slice.call(document.querySelectorAll('.stage-group'));
+  var cards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+  var chipsEl = document.getElementById('chips');
+  var search = document.getElementById('search');
+  var countEl = document.getElementById('count');
+  var emptyEl = document.getElementById('empty');
+  var active = 'all';
+
+  cards.forEach(function (c) { c.dataset.text = c.textContent.toLowerCase(); });
+
+  stages.forEach(function (s) {
+    var n = s[0] === 'all' ? cards.length :
+      document.querySelectorAll('.stage-group[data-stage="' + s[0] + '"] .card').length;
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.dataset.stage = s[0];
+    b.setAttribute('aria-pressed', s[0] === 'all' ? 'true' : 'false');
+    b.innerHTML = s[1] + '<span class="ct">' + n + '</span>';
+    b.addEventListener('click', function () {
+      active = s[0];
+      chipsEl.querySelectorAll('.chip').forEach(function (x) {
+        x.setAttribute('aria-pressed', x.dataset.stage === active ? 'true' : 'false');
+      });
+      apply();
+    });
+    chipsEl.appendChild(b);
+  });
+
+  function apply() {
+    var q = search.value.trim().toLowerCase();
+    var shown = 0;
+    groups.forEach(function (g) {
+      var stageOk = active === 'all' || g.dataset.stage === active;
+      var any = false;
+      g.querySelectorAll('.card').forEach(function (c) {
+        var ok = stageOk && (!q || c.dataset.text.indexOf(q) !== -1);
+        c.hidden = !ok;
+        if (ok) { any = true; shown++; }
+      });
+      g.hidden = !any;
+    });
+    emptyEl.hidden = shown !== 0;
+    countEl.textContent = shown + (shown === 1 ? ' piece' : ' pieces');
+  }
+  search.addEventListener('input', apply);
+  apply();
+
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy');
+      var done = function () { btn.textContent = 'copied'; setTimeout(function () { btn.textContent = 'copy'; }, 1500); };
+      try {
+        navigator.clipboard.writeText(text).then(done, function () { btn.textContent = 'select + copy'; });
+      } catch (e) { btn.textContent = 'select + copy'; }
+    });
+  });
+})();
+</script>
+</body>
+</html>
