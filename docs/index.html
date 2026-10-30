@@ -109,7 +109,7 @@ code, kbd { font-family: var(--mono); font-size: .86em; }
   color: var(--ink);
   overflow-wrap: anywhere;
 }
-.card code, .why code, .stops p code, .step code { background: none; border: 0; padding: 0; font-weight: 500; }
+.card code, .why code, .stops p code, .step code, .doc code { background: none; border: 0; padding: 0; font-weight: 500; }
 .wrap { max-width: 1160px; margin: 0 auto; padding: 0 16px; }
 @media (min-width: 720px) { .wrap { padding: 0 32px; } }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -398,6 +398,7 @@ h3 { font-size: 17px; font-weight: 650; margin: 0 0 6px; letter-spacing: -.015em
 .card .when { margin: auto 0 0; padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; color: var(--muted); }
 .card .when b { color: var(--ink); font-weight: 600; }
 .card .src { margin: 2px 0 0; font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }
+.card .desc + .src { margin-top: auto; padding-top: 4px; }
 .card .src a, .why .src a { color: var(--muted); text-decoration: none; transition: color .15s; }
 .card .src a::after, .why .src a::after { content: " ↗"; font-family: var(--sans); }
 .card:hover .src a { color: var(--ink-2); }
@@ -422,9 +423,71 @@ h3 { font-size: 17px; font-weight: 650; margin: 0 0 6px; letter-spacing: -.015em
 .why p { margin: 0 0 12px; color: var(--ink-2); font-size: 14.5px; line-height: 1.6; }
 .why .src { margin: auto 0 0; padding-top: 6px; font: 12px var(--mono); }
 
+/* exhibits: the artifact itself, next to one short claim */
+.ex { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 56px; align-items: center; margin-bottom: 96px; }
+.ex.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.ex.flip .ex-copy { order: 2; }
+.ex .tag { display: inline-flex; align-items: center; gap: 10px; font: 500 11.5px/1 var(--mono); letter-spacing: .12em; color: var(--accent); text-transform: uppercase; margin-bottom: 16px; }
+.ex .tag::before { content: ""; width: 18px; height: 1px; background: currentColor; }
+.ex h3 { font-size: clamp(23px, 2.7vw, 31px); line-height: 1.15; letter-spacing: -.035em; margin: 0 0 14px; }
+.ex-copy p { margin: 0 0 12px; color: var(--ink-2); font-size: 16px; }
+.ex-copy .src { margin-top: 18px; font: 12px var(--mono); }
+.ex-copy .src a { color: var(--muted); text-decoration: none; }
+.ex-copy .src a::after { content: " ↗"; font-family: var(--sans); }
+.ex-copy .src a:hover { color: var(--accent); }
+.ex figure { margin: 0; min-width: 0; }
+.ex figcaption { margin-top: 12px; font: 12px/1.5 var(--mono); color: var(--muted); }
+.ex .term { max-width: none; }
+@media (max-width: 900px) {
+  .ex, .ex.flip { grid-template-columns: minmax(0, 1fr); gap: 28px; margin-bottom: 72px; }
+  .ex.flip .ex-copy { order: 0; }
+}
+.term.wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.65; }
+.term .x { color: #F87171; font-weight: 600; }
+.term .m { color: #C8C8CF; }
+
+/* approval card, rendered */
+.doc { background: var(--surface); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow-hover); overflow: hidden; font-size: 14px; line-height: 1.55; }
+.doc-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 18px; background: var(--surface-2); border-bottom: 1px solid var(--line); font: 500 12.5px var(--mono); color: var(--ink); }
+.status { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--c-verify); border-radius: 999px; font: 600 11px/1 var(--mono); letter-spacing: .03em; color: var(--c-verify); }
+.status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.doc-body { padding: 4px 18px 16px; }
+.doc-sec { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 4px 20px; padding: 13px 0; border-top: 1px solid var(--line); }
+.doc-sec:first-child { border-top: 0; }
+.doc-sec h4 { margin: 0; font: 600 13px/1.4 var(--sans); color: var(--ink); }
+.doc-sec h4 span { display: block; margin-bottom: 3px; font: 500 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.doc-sec ul { margin: 0; padding: 0; list-style: none; color: var(--ink-2); }
+.doc-sec li + li { margin-top: 3px; }
+.doc-sec b { color: var(--ink); font-weight: 600; }
+.doc-sec.yours { margin-top: 8px; padding: 13px 12px; border: 1px dashed var(--accent); border-radius: 10px; background: var(--accent-soft); }
+.doc-sec.yours h4 span { color: var(--accent); }
+@media (max-width: 560px) { .doc-sec { grid-template-columns: 1fr; } }
+
+/* workstream folder */
+.tree {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 22px;
+  margin: 0; padding: 20px 22px;
+  list-style: none;
+  background: var(--code-bg); color: var(--code-ink);
+  border: 1px solid var(--code-line); border-radius: 12px;
+  font: 13px/1.5 var(--mono);
+  box-shadow: 0 24px 48px -28px rgba(0,0,0,.55);
+}
+.tree li { display: contents; }
+.tree .f { white-space: pre; }
+.tree .n { color: var(--code-dim); font: 12.5px/1.5 var(--sans); }
+.tree .root .f { color: #EC8A78; }
+.tree .hi .f { color: #F4F4F5; font-weight: 600; }
+.tree .hi .n { color: #EC8A78; }
+@media (max-width: 560px) {
+  .tree { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .tree .n { padding: 0 0 6px 3ch; }
+  .tree .n:empty { display: none; }
+}
+
 /* install */
-.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; max-width: 780px; }
-.steps > li { counter-increment: s; position: relative; display: grid; grid-template-columns: 34px 1fr; gap: 0 20px; padding-bottom: 40px; }
+.steps { counter-reset: s; list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); max-width: 780px; }
+.steps > li { counter-increment: s; position: relative; display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 0 20px; padding-bottom: 40px; }
 .steps > li:last-child { padding-bottom: 0; }
 .steps > li:not(:last-child)::after { content: ""; position: absolute; left: 16.5px; top: 42px; bottom: 6px; width: 1px; background: var(--line-2); }
 .steps > li::before {
@@ -440,7 +503,7 @@ h3 { font-size: 17px; font-weight: 650; margin: 0 0 6px; letter-spacing: -.015em
 .steps p { margin: 0 0 14px; color: var(--ink-2); font-size: 15px; }
 .steps .term { margin-top: 4px; }
 .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 64px; }
-@media (max-width: 780px) { .two { grid-template-columns: 1fr; } }
+@media (max-width: 780px) { .two { grid-template-columns: minmax(0, 1fr); } }
 .panel { border: 1px solid var(--line); border-radius: 14px; padding: 24px; background: var(--surface); box-shadow: var(--shadow); }
 .panel h3 { font-size: 18px; }
 .panel ul { margin: 10px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 14.5px; }
@@ -485,7 +548,7 @@ footer a { color: var(--ink-2); }
   <div class="wrap">
     <p class="badge"><span class="pulse"></span>For Claude Code<span class="sep"></span>MIT licensed</p>
     <h1>A build loop that <span>stops and waits for you.</span></h1>
-    <p class="lede">One command runs plan → execute → verify → review → route, round after round, until an adversarial review comes back clean or a round cap trips. Then it writes an approval card and stops. It fixes routine review findings on its own, escalates only what a human has to decide, and cannot open a PR, merge, or record an approval while it runs.</p>
+    <p class="lede">One command runs plan → execute → verify → review → route until an adversarial review comes back clean or a round cap trips. Then it writes an approval card and stops, and a hook keeps it from opening a PR, merging or pushing on its own.</p>
     <div class="term" id="hero-install">
       <pre><span class="p">$ </span>git clone https://github.com/ataglianetti/agent-orchestration-loop.git
 <span class="p">$ </span>agent-orchestration-loop/install.sh /path/to/your-repo</pre>
@@ -550,26 +613,24 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">install.sh</span><span class="kind">script</span></div>
-            <p class="desc">Copies the commands, planner, scripts and templates into a repo, and merges the guard and session-recorder hooks into <code>.claude/settings.json</code> without overwriting what's there.</p>
-            <p class="when"><b>Also:</b> checks for the three review skills the loop calls and names any it can't see. It never fails the install over them.</p>
+            <p class="desc">Copies the loop into a repo and merges its two hooks into <code>.claude/settings.json</code> without overwriting yours.</p>
+            <p class="when"><b>Also:</b> names any of the three review skills it can't find.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/install.sh">install.sh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Orchestration guide</span><span class="kind">rulebook</span></div>
-            <p class="desc">The repo's own rules, read at the start of every run. You fill four sections: contracts (§1), test and smoke commands (§5), guardrails (§6), execution order (§7).</p>
-            <p class="when"><b>Reach for it:</b> right after install. An existing guide is never overwritten.</p>
+            <p class="desc">Your repo's rules, read every run. You fill in contracts, test commands, guardrails and execution order.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/ORCHESTRATION_GUIDE.md">execution/ORCHESTRATION_GUIDE.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">/orchestrate</span><span class="kind">command</span></div>
-            <p class="desc">The loop. Creates or resumes a workstream, then runs rounds until review is clean, a human call comes up, or the round cap trips.</p>
+            <p class="desc">The loop. Creates or resumes a workstream and runs rounds until it has to stop.</p>
             <p class="when"><b>Reach for it:</b> a goal that spans more than one commit or session.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md">commands/orchestrate.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">init-workstream.sh</span><span class="kind">script</span></div>
-            <p class="desc">Scaffolds <code>docs/execution/active/&lt;id&gt;/</code> from the templates, with a README holding the run's Loop Config: round cap, posture, a model per tier, an optional ticket and plan price.</p>
-            <p class="when"><b>Reach for it:</b> <code>/orchestrate</code> runs it for a new id. Run it yourself to set Loop Config before round one.</p>
+            <p class="desc">Scaffolds the workstream folder, with a README holding the run's Loop Config.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/init-workstream.sh">scripts/init-workstream.sh</a></p>
           </article>
         </div>
@@ -580,26 +641,24 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">planner</span><span class="kind">agent</span></div>
-            <p class="desc">Read-only. Breaks the goal into atomic, testable, file-scoped tasks, groups them into waves, and tags each <code>mechanical</code>, <code>standard</code> or <code>hard</code>. It returns the plan and never writes a file.</p>
-            <p class="when"><b>Also:</b> takes a spec or notes file as the goal and follows its frontmatter links only to bound scope, never to widen it.</p>
+            <p class="desc">Read-only agent that splits the goal into file-scoped tasks in waves, each tagged <code>mechanical</code>, <code>standard</code> or <code>hard</code>.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/agents/planner.md">agents/planner.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Model routing</span><span class="kind">rule</span></div>
-            <p class="desc">Every subagent spawn names its model, chosen by task tier. Defaults: planner, hard tasks and the adversarial pass on <code>opus</code>; mechanical and standard tasks, the live check and lighter review passes on <code>sonnet</code>.</p>
-            <p class="when"><b>Reach for it:</b> override any default with a <code>model_*</code> key in Loop Config.</p>
+            <p class="desc">Every spawn names its model by tier: <code>opus</code> for planning, hard tasks and adversarial review, <code>sonnet</code> for the rest.</p>
+            <p class="when"><b>Override:</b> any <code>model_*</code> key in Loop Config.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#model-routing--every-spawn-names-its-model">orchestrate.md · Model routing</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">WORKBOARD · ACCEPTANCE_CRITERIA</span><span class="kind">template</span></div>
-            <p class="desc">The task board (in progress, queue with a tier column, blocked, done) and done conditions per chunk. The orchestrator writes both from the planner's output.</p>
+            <p class="desc">The task board by tier and status, and the done conditions for each chunk.</p>
             <p class="when"><b>Reach for it:</b> to see where a run is without reading the transcript.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/execution/templates">execution/templates/</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">RISKS_AND_BLOCKERS</span><span class="kind">template</span></div>
-            <p class="desc">The risk register. Seeded from the planner's risks; every parked finding gets an <code>R-###</code> row here; a non-convergent run writes its unresolved findings here.</p>
-            <p class="when"><b>Reach for it:</b> after a <code>NON-CONVERGENT</code> stop, to decide retry, narrow or hand off.</p>
+            <p class="desc">The risk register: planner risks, parked findings as <code>R-###</code> rows, and whatever a non-convergent run left open.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/RISKS_AND_BLOCKERS.template.md">RISKS_AND_BLOCKERS.template.md</a></p>
           </article>
         </div>
@@ -610,20 +669,19 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">Subagent task contract</span><span class="kind">template</span></div>
-            <p class="desc">The brief each executor gets: objective, files it may edit, what's out of scope, constraints, validation command, model, return format. Never the full conversation.</p>
+            <p class="desc">Each executor's brief: objective, files it may edit, validation command and model. Never the full conversation.</p>
             <p class="when"><b>Rule:</b> tasks run in parallel only when their write scopes don't overlap.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/SUBAGENT_TASK.template.md">SUBAGENT_TASK.template.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Tier escalation</span><span class="kind">rule</span></div>
-            <p class="desc">A task that fails its validation twice, or draws a <code>CRITICAL</code>, gets its fix one tier up instead of another try at the same tier. A third failure at <code>hard</code> becomes a finding.</p>
-            <p class="when"><b>Rule:</b> the orchestrator can raise a tier and log why. It never lowers one.</p>
+            <p class="desc">Two failed validations, or a <code>CRITICAL</code>, move the fix up one tier instead of retrying at the same one.</p>
+            <p class="when"><b>Rule:</b> tiers go up, never down.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#model-routing--every-spawn-names-its-model">orchestrate.md · Model routing, rule 2</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">DECISIONS</span><span class="kind">template</span></div>
-            <p class="desc">Every routing call, every answer to an executor's "your call?" question, and every human ruling, which goes in verbatim with its source and date.</p>
-            <p class="when"><b>Reach for it:</b> to rule on a <code>FLAG-HUMAN</code> outside chat, then re-run <code>/orchestrate &lt;id&gt;</code>.</p>
+            <p class="desc">Every routing call and every human ruling, the rulings verbatim with source and date.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/DECISIONS.template.md">DECISIONS.template.md</a></p>
           </article>
         </div>
@@ -634,19 +692,17 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">Coverage gate</span><span class="kind">gate</span></div>
-            <p class="desc">A test has to exercise this change and pass. No test for the new path counts as a fail, and a failed gate can't reach a clean exit.</p>
-            <p class="when"><b>Feeds:</b> the confidence read and the card's "How confident" section.</p>
+            <p class="desc">A test must exercise the change and pass. A missing test counts as a fail.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2b-verify--the-gates-your-eyes-not-the-pms">orchestrate.md · 2b</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Live check</span><span class="kind">gate</span></div>
-            <p class="desc">Runs the real build or endpoint through the <code>run</code> skill, in its own verify task, so browser and shell output stay out of the orchestrator's context. Returns pass/fail per check and a repro for any failure.</p>
-            <p class="when"><b>Needs:</b> the smoke commands named in guide §5.</p>
+            <p class="desc">Runs the real build or endpoint in its own task, using the smoke commands from guide §5.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2b-verify--the-gates-your-eyes-not-the-pms">orchestrate.md · 2b</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">TEST_PLAN · TEST_RESULTS</span><span class="kind">template</span></div>
-            <p class="desc">What will be validated (unit, integration, manual smoke) and what actually ran (automated, manual, and gaps with the reason a test couldn't run).</p>
+            <p class="desc">What will be tested, and what actually ran, with any gap and its reason.</p>
             <p class="when"><b>Rule:</b> no "done" without evidence here.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/execution/templates">execution/templates/</a></p>
           </article>
@@ -658,20 +714,19 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">Blast-radius ladder</span><span class="kind">rule</span></div>
-            <p class="desc">One pass for a small additive diff, two for one subsystem, three for cross-cutting work. Touching a guardrail, API contract or security surface forces all three: <code>adversarial-reviewer</code>, <code>run</code>, <code>code-review</code>.</p>
-            <p class="when"><b>Rule:</b> passes see only the round's diff and never each other's findings. A borderline or critical finding adds a pass.</p>
+            <p class="desc">One review pass for a small diff, two for one subsystem, three for cross-cutting work or anything touching a guardrail, contract or security surface.</p>
+            <p class="when"><b>Rule:</b> passes never see each other's findings.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2c-review--independent-personas-depth-scaled-to-blast-radius">orchestrate.md · 2c</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">REVIEW_CONTRACT</span><span class="kind">contract</span></div>
-            <p class="desc">Fixed tokens for severity, reachability, <code>FLAG-HUMAN</code>, disposition and verdict, and the rules for merging raw passes into one block. Routing keys off the tokens, not the reviewers' prose.</p>
+            <p class="desc">Fixed tokens for severity, reachability and verdict. Routing reads the tokens, not the reviewers' prose.</p>
             <p class="when"><b>Rule:</b> reviewers assess. The orchestrator decides what happens.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/REVIEW_CONTRACT.md">execution/REVIEW_CONTRACT.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Findings ledger</span><span class="kind">rule</span></div>
-            <p class="desc">Stable <code>F#</code> IDs across rounds in an append-only <code>REVIEW.md</code>. A settled finding that resurfaces is suppressed, unless its severity rose, it went live, the diff touched its code, or every pass raised it again.</p>
-            <p class="when"><b>Why:</b> so the round cap isn't spent re-arguing calls already made.</p>
+            <p class="desc">Stable <code>F#</code> IDs in an append-only <code>REVIEW.md</code>. A settled finding stays settled unless it changes or every pass raises it again.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/REVIEW_CONTRACT.md#5-normalization-raw-passes--one-verdict-block">REVIEW_CONTRACT.md · §5</a></p>
           </article>
         </div>
@@ -682,26 +737,25 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">Severity routing</span><span class="kind">rule</span></div>
-            <p class="desc">Live criticals get fixed this round and re-reviewed. Dormant ones are fixed if cheap or parked behind their flag. Warnings are fixed if cheap; trivial notes are auto-fixed. Any <code>FLAG-HUMAN</code> is a hard stop.</p>
-            <p class="when"><b>Rule:</b> a fixed critical isn't resolved until a fresh review pass confirms it.</p>
+            <p class="desc">Live criticals are fixed and re-reviewed this round, smaller findings are fixed if cheap or parked, and any <code>FLAG-HUMAN</code> stops the run.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2d-route--your-severityaction-policy-you-own-this-the-reviewer-only-assessed">orchestrate.md · 2d</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Confidence read</span><span class="kind">rule</span></div>
-            <p class="desc">Review consensus, the coverage gate and the live check, combined into one line per round. Low and reversible runs another verification round; low and consequential escalates.</p>
-            <p class="when"><b>Optional:</b> <code>escalate_to_engineer: on</code> pauses for a code owner's PR review instead of landing on you.</p>
+            <p class="desc">Reviews, coverage and the live check, read as one line per round. Low and consequential escalates to you.</p>
+            <p class="when"><b>Optional:</b> <code>escalate_to_engineer: on</code> sends it to a code owner instead.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#2e-score-confidence">orchestrate.md · 2e</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">APPROVAL_CARD</span><span class="kind">template</span></div>
-            <p class="desc">What you sign: what you asked for against what it built, how reversible it is with the revert path, how confident the stack is, and any decision only you can make, each with a recommendation.</p>
+            <p class="desc">What you sign at every stop. <a href="#why">See one filled in.</a></p>
             <p class="when"><b>Rule:</b> the loop never writes "APPROVED". That block is yours.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/APPROVAL_CARD.template.md">APPROVAL_CARD.template.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">Stop protocol</span><span class="kind">rule</span></div>
-            <p class="desc">Every hard stop prints one line with the status, branch and card path. In the Claude desktop app the run shows as waiting on you, and where a one-click answer fits, an Approve or "Go with recs" button sends your words as the ruling.</p>
-            <p class="when"><b>Optional:</b> the app pieces. The CLI runs the same loop without them.</p>
+            <p class="desc">Every hard stop prints one line: status, branch and card path.</p>
+            <p class="when"><b>In the desktop app:</b> the run shows as waiting on you, with an Approve or "Go with recs" button where one fits.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#the-stop-protocol--every-hard-stop-ends-this-way">orchestrate.md · Stop protocol</a></p>
           </article>
         </div>
@@ -712,37 +766,35 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">block-human-gated-actions.sh</span><span class="kind">hook</span></div>
-            <p class="desc">PreToolUse guard. While a run is active it blocks opening, merging and approving PRs, <code>git push</code>, and the routes around them: aliases, <code>gh api</code> writes, branch-protection changes, authenticated raw HTTP, reading the GitHub token.</p>
+            <p class="desc">While a run is active, blocks PRs, merges, approvals, pushes and the known routes around them. <a href="#why">See it refuse.</a></p>
             <p class="when"><b>Limit:</b> it matches text. Branch protection on the remote is the backstop.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/block-human-gated-actions.sh">scripts/block-human-gated-actions.sh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">.loop-active · ungate</span><span class="kind">marker</span></div>
-            <p class="desc">The soft marker. The loop writes it at the repo root and can't remove it; the guard walls every removal path it knows. You clear it from your own terminal with <code>rm</code>, or <code>ungate</code>, which also finds markers in other worktrees.</p>
-            <p class="when"><b>Opt-in:</b> source <code>loop-gate.zsh</code> from your shell rc. The installer never touches it.</p>
+            <p class="desc">The soft marker. The loop writes it and can't remove it. You clear it with <code>rm</code> or <code>ungate</code>.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/loop-gate.zsh">scripts/loop-gate.zsh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">lock-loop.sh · unlock-loop.sh</span><span class="kind">script</span></div>
-            <p class="desc">The hard lock. One <code>sudo</code> drops a root-owned marker outside the repo and freezes <code>.claude/</code> (except <code>worktrees/</code>), so the hook can't be unwired from inside. One <code>sudo</code> lifts it.</p>
+            <p class="desc">The hard lock. One <code>sudo</code> puts the marker and <code>.claude/</code> out of the agent's reach; one <code>sudo</code> lifts it.</p>
             <p class="when"><b>Reach for it:</b> unattended runs on a repo where a rogue ship would reach something real.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/lock-loop.sh">scripts/lock-loop.sh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">loop-status.sh</span><span class="kind">script</span></div>
-            <p class="desc">Read-only report of which marker, if any, holds the gate for this checkout, plus soft markers in other worktrees and any worktree the hard lock left unfrozen.</p>
-            <p class="when"><b>Used by:</b> <code>/orchestrate</code>, before it writes its own marker. And you, before locking or unlocking.</p>
+            <p class="desc">Read-only report of which marker holds the gate, in this checkout and in other worktrees.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/loop-status.sh">scripts/loop-status.sh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">scripts/tests/</span><span class="kind">tests</span></div>
-            <p class="desc">Five suites that run without root (the guard, denial-message safety, the hard marker, <code>ungate</code>, the cost record) and one smoke test that sets real immutable flags under <code>sudo</code>.</p>
-            <p class="when"><b>Notable:</b> the denial suite runs every command a block message suggests and checks that none clears the gate.</p>
+            <p class="desc">Five suites that run without root, plus one <code>sudo</code> smoke test of the real lock.</p>
+            <p class="when"><b>Notable:</b> one suite runs every command a block message suggests and checks none clears the gate.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/scripts/tests">scripts/tests/</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">KNOWN-GATE-ISSUES</span><span class="kind">log</span></div>
-            <p class="desc">A public defect log for the gate. Twelve found by independent review of the shipped scripts, each fixed in a linked PR; none open.</p>
+            <p class="desc">Public defect log for the gate: twelve found by independent review, each fixed in a linked PR, none open.</p>
             <p class="when"><b>Reach for it:</b> before trusting the gate on something that matters.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/docs/KNOWN-GATE-ISSUES.md">docs/KNOWN-GATE-ISSUES.md</a></p>
           </article>
@@ -754,26 +806,23 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">record-workstream-session.sh</span><span class="kind">hook</span></div>
-            <p class="desc">PostToolUse hook that notes each session that writes to a workstream, in <code>.git/loop-sessions/&lt;id&gt;.log</code>, so a run in a worktree is still on record after the worktree is gone.</p>
-            <p class="when"><b>Rule:</b> the log belongs to the hook. The loop never edits it.</p>
+            <p class="desc">Logs each session that writes to a workstream, so a worktree run stays on record after the worktree is gone.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/record-workstream-session.sh">scripts/record-workstream-session.sh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">close-workstream.sh</span><span class="kind">script</span></div>
-            <p class="desc">Your step. Moves the workstream to <code>done/</code> and writes a dollar-free Run record into its README: ticket, calendar, active and attended time, sessions, tokens, models, rounds.</p>
+            <p class="desc">Your step. Moves the workstream to <code>done/</code> and writes a Run record: time, tokens, models, rounds.</p>
             <p class="when"><b>Reach for it:</b> soon after the work ends. Claude Code can delete old session transcripts.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/close-workstream.sh">scripts/close-workstream.sh</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">workstream-cost/</span><span class="kind">script</span></div>
-            <p class="desc">With <code>plan_price</code> in Loop Config (or <code>WORKSTREAM_PLAN_PRICE</code> in your shell), close also writes <code>COST.html</code>: the run's tokens at live Claude API list prices, next to the flat fee you paid.</p>
-            <p class="when"><b>Default:</b> off. The installer gitignores <code>COST.html</code> and <code>cost.json</code>.</p>
+            <p class="desc">Opt-in. With a <code>plan_price</code> set, close also prices the run's tokens at API list rates in <code>COST.html</code>.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/tree/main/scripts/workstream-cost">scripts/workstream-cost/</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">RUN_LOG</span><span class="kind">template</span></div>
-            <p class="desc">Append-only, one entry per round: what ran, which model each task used and why, the confidence read, and any re-raised findings it suppressed.</p>
-            <p class="when"><b>Why:</b> a cost review can't tell a cheap model that worked from one that forced a rerun without it.</p>
+            <p class="desc">Append-only, one entry per round: what ran, on which model and why, and the confidence read.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/RUN_LOG.template.md">RUN_LOG.template.md</a></p>
           </article>
         </div>
@@ -784,14 +833,13 @@ footer a { color: var(--ink-2); }
         <div class="grid">
           <article class="card">
             <div class="card-top"><span class="name">VERDICT_HARNESS</span><span class="kind">template</span></div>
-            <p class="desc">For work whose real test is a keep/kill/extend call after a dogfood or pilot. Criteria tallies, a usage log, evidence logs, a safety log, a friction list, and the verdict you write at the deadline.</p>
-            <p class="when"><b>Rule:</b> the loop builds the surfaces and scaffolds this. The verdict is yours.</p>
+            <p class="desc">For work whose real test is a keep, kill or extend call after real use.</p>
+            <p class="when"><b>Rule:</b> the loop scaffolds it. The verdict is yours.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/VERDICT_HARNESS.template.md">VERDICT_HARNESS.template.md</a></p>
           </article>
           <article class="card">
             <div class="card-top"><span class="name">/dogfood</span><span class="kind">command</span></div>
-            <p class="desc">One-line friction capture into the harness, with one short question when a report is too vague to fix cold. <code>/dogfood reconcile</code> fills the Resolved column from merged PRs.</p>
-            <p class="when"><b>Join key:</b> a fix PR names its entry as <code>friction: &lt;date&gt; &lt;slug&gt;</code>.</p>
+            <p class="desc">One-line friction capture into the harness. <code>/dogfood reconcile</code> marks entries resolved from merged PRs.</p>
             <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/dogfood.md">commands/dogfood.md</a></p>
           </article>
         </div>
@@ -807,44 +855,103 @@ footer a { color: var(--ink-2); }
     <div class="sec-head">
       <span class="num">03 · What's different</span>
       <h2>Built around the run that shipped itself.</h2>
-      <p>The first time this loop ran for real, it reached a clean review, approved its own work and opened a PR. It had been told never to do that. The mechanical gate exists because of that run.</p>
+      <p>The first time this loop ran for real, it approved its own work and opened a PR. Everything below follows from that run.</p>
     </div>
-    <div class="why">
-      <article>
+
+    <div class="ex">
+      <div class="ex-copy">
         <span class="tag">The gate</span>
         <h3>It can't ship on its own.</h3>
-        <p>Prose instructions have a ceiling: an agent trying to finish will reason its way past them. So a hook blocks the shipping commands while a run is active, and the marker that turns the hook on is one the loop is walled off from removing.</p>
+        <p>While a run is active, a hook refuses the shipping commands. It also refuses to let the loop remove the marker that switches the hook on.</p>
+        <p>Clearing the gate is the one step that happens in your terminal, outside the thing being gated.</p>
         <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop#the-human-gate--why-its-mechanical-not-just-instructions">README · The human gate</a></p>
-      </article>
+      </div>
+      <figure>
+        <div class="term wrap">
+          <pre><span class="c"># the agent, mid-run</span>
+<span class="p">$ </span>gh pr create --fill
+<span class="x">✕ blocked · exit 2</span>
+<span class="m">Blocked by the orchestrate loop guard: a workstream loop is active (a run marker is present). Opening/merging PRs and pushing are human-gated — the loop must never perform them on its own (it self-approved a PR once; this guard is why it cannot again). Write the approval card and stop instead. If you are the human acting deliberately, clear the gate from your own terminal (not through the agent): rm '/path/to/your-repo/.loop-active'</span>
+
+<span class="p">$ </span>rm .loop-active
+<span class="x">✕ blocked · exit 2</span>
+<span class="m">Blocked by the orchestrate loop guard: the .loop-active marker is human-only. The loop writes it at run start and never removes it — if the loop could clear its own gate, the gate would not be a gate. […]</span></pre>
+        </div>
+        <figcaption>Real output of block-human-gated-actions.sh. Second message shortened; repo path is a placeholder.</figcaption>
+      </figure>
+    </div>
+
+    <div class="ex flip">
+      <div class="ex-copy">
+        <span class="tag">Your job</span>
+        <h3>You read a card, not a diff.</h3>
+        <p>Every stop ends with one. You judge two things: is this what you asked for, and how bad is it if it's wrong. Correctness belongs to the reviewers, the coverage gate and the live check.</p>
+        <p>The loop fills in everything except the Approval block.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/APPROVAL_CARD.template.md">APPROVAL_CARD.template.md</a></p>
+      </div>
+      <figure>
+        <div class="doc">
+          <div class="doc-bar"><span>APPROVAL_CARD.md</span><span class="status">CLEAN — AWAITING PM APPROVAL</span></div>
+          <div class="doc-body">
+            <div class="doc-sec"><h4><span>§1</span>What you asked for → what it built</h4><ul><li><b>Asked:</b> CSV export on the reports page</li><li><b>Built:</b> an Export button that downloads the filtered rows</li><li><b>Scope:</b> on-scope</li></ul></div>
+            <div class="doc-sec"><h4><span>§2</span>How reversible</h4><ul><li>Behind flag <code>reports_csv_export</code>, additive only → wrong is cheap</li><li><b>Revert path:</b> turn the flag off, or revert one commit</li></ul></div>
+            <div class="doc-sec"><h4><span>§3</span>How confident</h4><ul><li><b>Reviewers:</b> 2 independent passes, no open findings</li><li><b>Coverage:</b> a test exercises the export and passes</li><li><b>Live-check:</b> ran against the local build; rows match the filter</li><li><b>Read:</b> verified three ways, all agree</li></ul></div>
+            <div class="doc-sec"><h4><span>§4</span>Decisions needed</h4><ul><li>None.</li></ul></div>
+            <div class="doc-sec"><h4><span>§5</span>Findings digest</h4><ul><li><b>Auto-fixed:</b> [F2] export ignored the active date filter → fixed and re-reviewed</li><li><b>Parked:</b> 1 → <code>RISKS_AND_BLOCKERS.md</code></li></ul></div>
+            <div class="doc-sec yours"><h4><span>Human-only</span>Approval</h4><ul><li><b>Decision:</b> awaiting you</li></ul></div>
+          </div>
+        </div>
+        <figcaption>Illustrative fill. Sections from APPROVAL_CARD.template.md.</figcaption>
+      </figure>
+    </div>
+
+    <div class="ex">
+      <div class="ex-copy">
+        <span class="tag">Audit trail</span>
+        <h3>Everything lands on disk.</h3>
+        <p>The workstream folder is the run's memory and its paper trail. Re-run <code>/orchestrate &lt;id&gt;</code> in a fresh session and it picks up from these files.</p>
+        <p>Close it after merge and the README gains a record of time, tokens, models and rounds.</p>
+        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/scripts/init-workstream.sh">scripts/init-workstream.sh</a></p>
+      </div>
+      <figure>
+        <ul class="tree" aria-label="Workstream folder">
+          <li class="root"><span class="f">docs/execution/active/csv-export/</span><span class="n"></span></li>
+          <li class="hi"><span class="f">├─ APPROVAL_CARD.md</span><span class="n">written at the stop; read this first</span></li>
+          <li><span class="f">├─ README.md</span><span class="n">Loop Config, then the Run record at close</span></li>
+          <li><span class="f">├─ WORKBOARD.md</span><span class="n">tasks by tier and status</span></li>
+          <li><span class="f">├─ ACCEPTANCE_CRITERIA.md</span><span class="n">done conditions per chunk</span></li>
+          <li><span class="f">├─ TEST_PLAN.md</span><span class="n">what will be tested</span></li>
+          <li><span class="f">├─ TEST_RESULTS.md</span><span class="n">what ran, and any gap with its reason</span></li>
+          <li><span class="f">├─ REVIEW.md</span><span class="n">append-only findings ledger, F# IDs</span></li>
+          <li><span class="f">├─ DECISIONS.md</span><span class="n">routing calls, your rulings verbatim</span></li>
+          <li><span class="f">├─ RISKS_AND_BLOCKERS.md</span><span class="n">parked findings as R-### rows</span></li>
+          <li><span class="f">├─ RUN_LOG.md</span><span class="n">one entry per round, models included</span></li>
+          <li><span class="f">└─ SUBAGENTS/</span><span class="n"></span></li>
+          <li><span class="f">   ├─ T-001.md</span><span class="n">one executor's contract</span></li>
+          <li><span class="f">   └─ T-002.md</span><span class="n"></span></li>
+        </ul>
+        <figcaption>What init-workstream.sh scaffolds, plus the files a run writes. The id is a placeholder.</figcaption>
+      </figure>
+    </div>
+
+    <div class="why">
       <article>
         <span class="tag">Honest limits</span>
         <h3>It tells you where the guard stops.</h3>
-        <p>The guard matches text, so a command that assembles its words at runtime can get past it. The README says so and names the backstop: branch protection that requires a pull request and an approving review from someone other than the author. The hard lock goes further and puts the marker and the repo's hook wiring out of the agent's reach. It also names what the lock leaves open, starting with user-level <code>~/.claude/settings.json</code>.</p>
+        <p>The guard matches text, and the README says so. It names branch protection as the backstop, and lists what even the hard lock leaves open.</p>
         <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop#the-marker-the-gate-reads--soft-by-default-hard-when-it-matters">README · Soft and hard markers</a></p>
-      </article>
-      <article>
-        <span class="tag">Your job</span>
-        <h3>You sign off on two things.</h3>
-        <p>Intent and scope: is this what you asked for? Reversibility: if it's wrong, how bad and how recoverable? Correctness goes to the verification stack (independent reviewers, a coverage gate, a live check), which is why that stack has to be strong enough to earn a sign-off without reading the diff.</p>
-        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/templates/APPROVAL_CARD.template.md">APPROVAL_CARD.template.md</a></p>
       </article>
       <article>
         <span class="tag">Convergence</span>
         <h3>Settled findings stay settled.</h3>
-        <p>Without a ledger, a parked finding the reviewer keeps rediscovering gets re-routed every round until the cap runs out. Stable IDs and a whole-file seen-set stop that. The matcher can overrule one reviewer's memory, never all of them at once.</p>
+        <p>Stable finding IDs keep a parked issue from being re-argued every round until the cap runs out.</p>
         <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/execution/REVIEW_CONTRACT.md">REVIEW_CONTRACT.md</a></p>
       </article>
       <article>
         <span class="tag">Cost</span>
         <h3>Cheap models do cheap work, never cheap review.</h3>
-        <p>A subagent spawned without a model runs on the session's model, so a one-line rename would run on the most expensive one available. Here the planner tiers every task, and if any task in a round ran on the hard-tier model, every review pass that round does too.</p>
+        <p>Every task gets a model by tier. If any task in a round ran on the hard-tier model, every review pass that round does too.</p>
         <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop/blob/main/commands/orchestrate.md#model-routing--every-spawn-names-its-model">orchestrate.md · Model routing</a></p>
-      </article>
-      <article>
-        <span class="tag">Audit trail</span>
-        <h3>Everything lands on disk.</h3>
-        <p>The workstream folder is the run's memory and its paper trail: the card up front, then review rounds, decisions, test results and the run log. Close it and the README gains a record of time, tokens, models and rounds.</p>
-        <p class="src"><a href="https://github.com/ataglianetti/agent-orchestration-loop#using-it">README · Using it</a></p>
       </article>
     </div>
   </div>
